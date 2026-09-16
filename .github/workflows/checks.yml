@@ -36,7 +36,7 @@ jobs:
           code=true
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
             git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"
-            if ! grep -Eq '^(src/|tests/|package(-lock)?\.json$|tsconfig\.json$|\.nvmrc$|\.github/(scripts/|workflows/))' "$RUNNER_TEMP/changed-files"; then
+            if ! grep -Eq '^(src/|tests/|bin/|package(-lock)?\.json$|tsconfig\.json$|\.nvmrc$|\.github/(scripts/|workflows/))' "$RUNNER_TEMP/changed-files"; then
               code=false
             fi
           fi
