@@ -79,6 +79,7 @@ export class ConversationRoom {
       return results
     } finally { this.active = false }
   }
+  async choices(member: MemberId, name: 'model' | 'effort'): Promise<import('./conversation.js').CommandChoice[]> { const session = await this.connect(member); if (!session.choices) return []; return session.choices(name) }
   async command(member: MemberId, name: string, argument: string): Promise<string> {
     if (this.active) throw new Error('请等待房间当前轮次结束')
     const session = await this.connect(member)

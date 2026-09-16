@@ -1,6 +1,8 @@
 import type { Telemetry } from './telemetry.js'
+export interface CommandChoice { value: string; label: string; description: string; current?: boolean }
+export interface ToolActivity { id: string; name: string; input?: unknown; output?: string; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown' }
 export interface NativeCommand { name: string; description: string }
-export interface SessionEvent { type: 'text' | 'tool' | 'notice'; text: string }
+export interface SessionEvent { type: 'text' | 'tool' | 'notice'; text: string; tool?: ToolActivity }
 export type InteractionPrompt = {
   readonly title: string
   readonly details: string
@@ -10,6 +12,7 @@ export type InteractionPrompt = {
   | { readonly kind: 'question'; readonly options: readonly { label: string; description: string }[]; readonly allowOther: boolean; readonly secret: boolean }
 )
 export interface SessionOptions {
+  env?: NodeJS.ProcessEnv
   cwd: string
   resumeThreadId?: string
   onCommands?: (commands: NativeCommand[]) => void
@@ -23,6 +26,7 @@ export interface TurnResult { status: 'completed' | 'cancelled' | 'failed'; text
 export interface Conversation {
   initialize(): Promise<{ threadId: string; model: string }>
   run(text: string): Promise<TurnResult>
+  choices?(name: 'model' | 'effort'): Promise<CommandChoice[]>
   command?(name: string, argument: string): Promise<string>
   cancel(): Promise<void>
   close(): Promise<void>
