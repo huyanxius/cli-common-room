@@ -334,6 +334,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       return
     }
     if (picker) {
+      if (key.ctrl && key.name === 'c') { picker = undefined; if (busy) cancel(); else void stop(); return }
       if (key.name === 'escape') { picker = undefined; redraw(); return }
       if (busy && picker.name !== 'queue') return
       if (key.name === 'up' || key.name === 'down') picker.index = (picker.index + (key.name === 'down' ? 1 : -1) + picker.choices.length) % picker.choices.length
