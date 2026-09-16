@@ -1,5 +1,6 @@
 import { openClaudeSession } from './adapters/claude/session.js'
 import { createApplication } from './app.js'
+import { SetupPreferences } from './storage/setup.js'
 import { terminalWorkspace } from './terminal/workspace.js'
 
 const args = process.argv.slice(2)
@@ -8,6 +9,7 @@ const help = `用法：room [--codex-bin 路径] [--claude-bin 路径]
 在当前工作目录打开 Claude Code 与 Codex 的统一 TUI。
 /to codex|claude|all 选择接收者；输入 / 浏览当前成员的命令。
 
+--setup        打开成员配置与原生登录引导
 --status       查看支持的连接入口，不启动会话
 --check-codex  检查原生协议握手
 --help         显示帮助
@@ -26,7 +28,7 @@ try {
       const path = args[++index]
       if (!path?.trim() || path.startsWith('--')) throw new Error('程序路径不能为空')
       if (flag === '--codex-bin') codexBin = path; else claudeBin = path
-    } else if (['--help', '--status', '--version', '--check-codex', '--codex-chat'].includes(flag)) {
+    } else if (['--help', '--status', '--version', '--check-codex', '--codex-chat', '--setup'].includes(flag)) {
       if (mode !== 'tui' || (flag !== '--codex-chat' && switches.has('--codex-chat'))) throw new Error('不支持同时指定多个启动模式')
       mode = flag.slice(2)
     } else throw new Error('不支持此命令。使用 --help 查看帮助。')
@@ -38,7 +40,7 @@ try {
     try { await createApplication().checkCodexConnection(codexBin); console.log('Codex 原生协议握手成功。未发送模型请求。') }
     catch (error) { console.error(error instanceof Error ? error.message : '连接失败'); process.exitCode = 1 }
   } else {
-    try { await terminalWorkspace({ codex: options => createApplication().openCodexSession(options, codexBin), claude: options => openClaudeSession(options, claudeBin) }) }
+    try { const store = new SetupPreferences(); const settings = await store.load(); if (codexBin) settings.binaries.codex = codexBin; if (claudeBin) settings.binaries.claude = claudeBin; await terminalWorkspace({ codex: options => createApplication().openCodexSession(options, settings.binaries.codex), claude: options => openClaudeSession(options, settings.binaries.claude) }, { store, settings, force: mode === 'setup' }) }
     catch (error) { console.error(error instanceof Error ? error.message : '会话失败'); process.exitCode = 1 }
   }
 } catch (error) { console.error(error instanceof Error ? error.message : '参数错误'); process.exitCode = 2 }
