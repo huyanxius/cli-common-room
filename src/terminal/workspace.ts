@@ -258,7 +258,8 @@ export async function terminalWorkspace(factories: ConversationFactories, config
         if (name === 'setup' || name === 'login') { if (!configuration) throw new Error('当前入口未配置登录服务'); if (argument && !memberIds.includes(argument as MemberId)) throw new Error('用法：/login codex|claude|agy'); openSetup(name === 'login' ? (argument || single() || 'claude') as MemberId : undefined) }
         else if (name === 'help') note(commands.map(([command, detail]) => `/${command}  ${detail}`).join('\n') + '\n@codex @agy 可同时点名；@all 选择全部成员。命令只作用于当前单个成员。')
         else if ((name === 'model' || name === 'effort') && !argument) {
-          const member = single()
+          const routedMembers = targets(routed.recipient)
+          const member = routedMembers.length === 1 ? routedMembers[0] : undefined
           if (!member) throw new Error('先用 @ 选择要设置的单个成员')
           if (member === 'agy') note(await room.command(member, name, ''))
           else {
@@ -299,7 +300,8 @@ export async function terminalWorkspace(factories: ConversationFactories, config
           }
         }
         else {
-          const member = single()
+          const routedMembers = targets(routed.recipient)
+          const member = routedMembers.length === 1 ? routedMembers[0] : undefined
           if (!member) throw new Error('命令需要明确的单个成员，请先 /to codex、claude 或 agy')
           note(await room.command(member, name, argument))
           if (name === 'usage') note(quotaLines(state.telemetry.quotas ?? []).join('\n'))
