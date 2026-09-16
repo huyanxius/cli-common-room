@@ -23,7 +23,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
   let showingSetup = !!configuration, setupGeneration = 0, connectionsChanged = false, setupConnecting = false
   let login: NativeLogin | undefined
   let interactionIndex = -1
-  let picker: { name: 'model' | 'effort' | 'queue'; member: MemberId; choices: import('../room/conversation.js').CommandChoice[]; index: number } | undefined
+  let picker: { name: 'model' | 'effort' | 'queue' | 'resume'; member: MemberId; choices: import('../room/conversation.js').CommandChoice[]; index: number } | undefined
   let tick = 0
   const queue = new MessageQueue()
   let menuIndex = 0
@@ -52,7 +52,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     state.menu = interaction ? (interaction.prompt.kind === 'approval' ? interaction.prompt.choices.map(item => item.label) : interaction.prompt.options.map(item => `${item.label}  ${item.description}`)) : picker ? picker.choices.map(choice => `${choice.current ? '●' : '○'} ${choice.label}  ${choice.description}`) : inputMenu()
     if (interaction) state.menuIndex = interactionIndex
     if (picker) state.menuIndex = picker.index
-    state.pickerTitle = picker ? `${picker.member} · 选择${picker.name === 'model' ? '模型' : picker.name === 'queue' ? '队列操作' : '思考强度'} · ↑↓ Enter 确认 · Esc 返回` : ''
+    state.pickerTitle = picker?.name === 'resume' ? '恢复会话 · ↑↓ 选择 · Enter 恢复 · Esc 返回' : picker ? `${picker.member} · 选择${picker.name === 'model' ? '模型' : picker.name === 'queue' ? '队列操作' : '思考强度'} · ↑↓ Enter 确认 · Esc 返回` : ''
     state.queue = queue.items.map(item => `@${item.recipient}  ${item.text.replace(/\n/g, ' ')}`); state.queuePaused = queue.paused
     state.seconds = busy && started ? Math.floor((Date.now() - started) / 1000) : 0
     state.tick = tick
@@ -242,7 +242,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       try { queue.add(text, routed.recipient) } catch (error) { state.editor = { ...state.editor, text, cursor: graphemes(text).length }; note(String(error)) }
       redraw(); return
     }
-    if (busy || (!ready && !['/new', '/exit', '/quit', '/setup', '/login'].includes(text) && !text.startsWith('/login ') && !text.startsWith('/to '))) { state.editor = { ...state.editor, text, cursor: graphemes(text).length }; note('当前操作尚未结束，输入已保留。'); return }
+    if (busy || (!ready && !['/new', '/exit', '/quit', '/setup', '/login'].includes(text) && !text.startsWith('/login ') && !text.startsWith('/to ') && !/^\/resume(?:\s|$)/.test(text))) { state.editor = { ...state.editor, text, cursor: graphemes(text).length }; note('当前操作尚未结束，输入已保留。'); return }
     if (text === '/exit' || text === '/quit') { await stop(); return }
     busy = true; started = Date.now(); state.activity = ''; state.status = 'Running'; state.scroll = 0; currentReply = undefined; redraw()
     try {
@@ -266,7 +266,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
         }
         else if (name === 'new' || name === 'clear') { queue.pause(); await room.close(); await archive.release(); archive = new RoomArchive(state.cwd); room = new ConversationRoom(factories, options, snapshot => archive.save(snapshot)); telemetry.codex = {}; telemetry.claude = {}; state.telemetry = {}; state.messages = []; await select(selected) }
         else if (name === 'resume') {
-          if (!argument) note((await archive.list()).map(item => `${item.id} · ${item.updatedAt} · ${item.count} 条消息`).join('\n') || '当前工作区没有已保存房间')
+          if (!argument) {
+            const entries = (await archive.list()).filter(item => item.id !== archive.id && item.count > 0)
+            if (!entries.length) note('当前工作区暂无可恢复的历史会话。')
+            else picker = { name: 'resume', member: selected === 'all' ? 'codex' : selected, index: 0, choices: entries.map(item => ({
+              value: item.id,
+              label: graphemes(clean(item.preview)).slice(0, 32).join('') || '空会话',
+              description: `${item.members.map(member => member === 'claude' ? 'Claude Code' : 'Codex').join(' + ')} · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${item.count} 条`,
+            })) }
+          }
           else {
             if (argument === archive.id) throw new Error('当前已在此房间')
             queue.pause()
@@ -276,7 +284,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
             telemetry.codex = {}; telemetry.claude = {}
             room = new ConversationRoom(factories, options, value => archive.save(value), snapshot)
             state.messages = snapshot.history.map(message => ({ role: message.author === 'user' ? '你' : message.author === 'claude' ? 'Claude Code' : 'Codex', text: message.text }))
-            await select(selected)
+            await select(snapshot.bindings.length > 1 ? 'all' : snapshot.bindings[0]?.member ?? selected)
             note(snapshot.uncertain.length ? '存在交付状态未知的成员，已阻止自动重发。/new 可开始新的房间。' : '房间已恢复，原生上下文与交付位置沿用存档。')
           }
         }
@@ -340,7 +348,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if (key.name === 'up' || key.name === 'down') picker.index = (picker.index + (key.name === 'down' ? 1 : -1) + picker.choices.length) % picker.choices.length
       else if (key.name === 'return') {
         const target = picker; const choice = target.choices[target.index]!
-        if (target.name === 'queue') { picker = undefined; void submit(`/queue ${choice.value}`); redraw(); return }
+        if (target.name === 'queue' || target.name === 'resume') { picker = undefined; void submit(`/${target.name} ${choice.value}`); redraw(); return }
         picker = undefined; busy = true; started = Date.now(); state.status = 'Running'
         void (async () => {
           try {

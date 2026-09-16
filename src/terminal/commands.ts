@@ -6,7 +6,7 @@ export const commands = [
   ['mcp', '当前成员 · MCP 连接状态'], ['compact', '当前成员 · 原生上下文压缩'],
   ['new', '创建新房间，两位成员使用新的原生会话'],
   ['diff', '工作区与暂存区差异'],
-  ['resume', '列出当前工作区房间；/resume ID 恢复'],
+  ['resume', '选择并恢复当前工作区的历史会话'],
   ['to', '选择接收者：codex / claude / all'],
   ['clear', '新房间，重建原生上下文'], ['screen-clear', '仅清空可见消息，保留原生上下文'], ['exit', '退出 Common Room'],
 ] as const

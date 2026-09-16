@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { RoomSnapshot } from '../room/live.js'
 import { validateSnapshot } from '../room/live.js'
+export interface ArchiveEntry { id: string; updatedAt: string; count: number; preview: string; members: string[] }
 export class RoomArchive {
   id = randomUUID() as string
   private readonly directory: string
@@ -42,16 +43,19 @@ export class RoomArchive {
     await writeFile(temp, JSON.stringify({ cwd: this.cwd, updatedAt: new Date().toISOString(), snapshot }), { mode: 0o600 })
     await rename(temp, path)
   }
-  async list(): Promise<Array<{ id: string; updatedAt: string; count: number }>> {
+  async list(): Promise<ArchiveEntry[]> {
     let files: string[]
     try { files = await readdir(this.directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
-    const result: Array<{ id: string; updatedAt: string; count: number }> = []
+    const result: ArchiveEntry[] = []
     for (const file of files.filter(file => file.endsWith('.json'))) {
       try {
         const value = JSON.parse(await readFile(join(this.directory, file), 'utf8')) as { cwd: string; updatedAt: string; snapshot: RoomSnapshot }
         if (value.cwd !== this.cwd) continue
         validateSnapshot(value.snapshot)
-        result.push({ id: file.slice(0, -5), updatedAt: value.updatedAt, count: value.snapshot.history.length })
+        if (typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) continue
+        const history = value.snapshot.history
+        const preview = [...history].reverse().find(message => message.author === 'user')?.text ?? history.at(-1)?.text ?? '空会话'
+        result.push({ id: file.slice(0, -5), updatedAt: value.updatedAt, count: history.length, preview: preview.replace(/\s+/g, ' ').trim(), members: value.snapshot.bindings.map(binding => binding.member) })
       } catch { /* 损坏的档案不进入可恢复目录；不修改原文件。 */ }
     }
     return result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
