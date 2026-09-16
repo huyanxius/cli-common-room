@@ -1,24 +1,44 @@
+import { openClaudeSession } from './adapters/claude/session.js'
 import { createApplication } from './app.js'
-import { nativeChat } from './terminal/native-chat.js'
-import { renderStatus } from './terminal/status.js'
+import { terminalWorkspace } from './terminal/workspace.js'
 
 const args = process.argv.slice(2)
-if (args.length === 1 && args[0] === '--help') {
-  console.log('用法：npm start -- [--status | --codex-chat | --check-codex | --help]\n\n--status  查看成员接入状态（默认）\n--codex-chat  单成员真实会话（可加 --codex-bin 程序路径）\n--check-codex  检查原生连接（可加 --codex-bin 程序路径）\n--help    显示帮助\n\n当前支持 Codex 单成员会话，尚未实现双方群聊。')
-} else if (args[0] === '--codex-chat' && (args.length === 1 || (args.length === 3 && args[1] === '--codex-bin' && args[2]?.trim()))) {
-  try { await nativeChat(options => createApplication().openCodexSession(options, args[2])) }
-  catch (error) { console.error(error instanceof Error ? error.message : 'Codex 会话失败'); process.exitCode = 1 }
-} else if (args[0] === '--check-codex' && (args.length === 1 || (args.length === 3 && args[1] === '--codex-bin' && args[2]?.trim()))) {
-  try {
-    await createApplication().checkCodexConnection(args[2])
-    console.log('Codex 原生协议握手成功。未创建聊天或发送模型请求；完整群聊尚未接入。')
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : 'Codex 原生连接失败')
-    process.exitCode = 1
+const help = `用法：common-room [--codex-bin 路径] [--claude-bin 路径]
+
+在当前工作目录打开 Claude Code 与 Codex 的统一 TUI。
+/to codex|claude|all 选择接收者；输入 / 浏览当前成员的命令。
+
+--status       查看支持的连接入口，不启动会话
+--check-codex  检查原生协议握手
+--help         显示帮助
+--version      显示版本
+--codex-chat   兼容旧入口，等同默认 TUI
+
+原生认证、工具、配置和审批保持生效。`
+try {
+  let mode = 'tui', codexBin: string | undefined, claudeBin: string | undefined
+  const switches = new Set<string>()
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index]!
+    if (switches.has(flag)) throw new Error('不支持重复参数')
+    switches.add(flag)
+    if (flag === '--codex-bin' || flag === '--claude-bin') {
+      const path = args[++index]
+      if (!path?.trim() || path.startsWith('--')) throw new Error('程序路径不能为空')
+      if (flag === '--codex-bin') codexBin = path; else claudeBin = path
+    } else if (['--help', '--status', '--version', '--check-codex', '--codex-chat'].includes(flag)) {
+      if (mode !== 'tui' || (flag !== '--codex-chat' && switches.has('--codex-chat'))) throw new Error('不支持同时指定多个启动模式')
+      mode = flag.slice(2)
+    } else throw new Error('不支持此命令。使用 --help 查看帮助。')
   }
-} else if (args.length === 0 || (args.length === 1 && args[0] === '--status')) {
-  console.log(renderStatus(createApplication().agents))
-} else {
-  console.error('不支持此命令。使用 --help 查看当前可用命令。')
-  process.exitCode = 2
-}
+  if (mode === 'help') console.log(help)
+  else if (mode === 'version') console.log('common-room 0.0.0')
+  else if (mode === 'status') console.log('Claude Code：本机 CLI + 官方 SDK\nCodex：本机 app-server\n运行 common-room 连接当前工作区；状态列表不代表认证或模型请求已验证。')
+  else if (mode === 'check-codex') {
+    try { await createApplication().checkCodexConnection(codexBin); console.log('Codex 原生协议握手成功。未发送模型请求。') }
+    catch (error) { console.error(error instanceof Error ? error.message : '连接失败'); process.exitCode = 1 }
+  } else {
+    try { await terminalWorkspace({ codex: options => createApplication().openCodexSession(options, codexBin), claude: options => openClaudeSession(options, claudeBin) }) }
+    catch (error) { console.error(error instanceof Error ? error.message : '会话失败'); process.exitCode = 1 }
+  }
+} catch (error) { console.error(error instanceof Error ? error.message : '参数错误'); process.exitCode = 2 }
