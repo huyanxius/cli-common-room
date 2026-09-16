@@ -26,9 +26,12 @@ with tempfile.TemporaryDirectory() as root:
         send('@all 全部看看\r'); wait_for('ANSWER_claude'); wait_for('Ready')
         events = [json.loads(line) for line in open(trace)]
         assert [e['member'] for e in events] == ['agy', 'codex', 'codex', 'claude', 'agy'], events
+        send('@agy /probe\r'); wait_for('COMMAND_OK')
+        events = [json.loads(line) for line in open(trace)]
+        assert events[-1] == {'member': 'agy', 'command': 'probe', 'argument': ''}, events
         send('/exit\r'); wait_for('TUI_EXITED')
         assert process.wait(timeout=3) == 0
         print('multi mention PTY passed')
     finally:
-        if process.poll() is None: process.terminate(); process.wait(timeout=3)
+        if process.poll() is None: process.kill(); process.wait(timeout=3)
         os.close(master); os.close(slave)
