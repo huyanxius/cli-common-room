@@ -58,3 +58,30 @@ test('轮次超时关闭连接，不把未完成内容当作成功或允许继�
     await assert.rejects(session.run('retry'), /关闭/)
   } finally { await session.close() }
 })
+
+test('用量按线程过滤，模型命令传原生参数而不是提示词', async () => {
+  const snapshots: import('../src/room/telemetry.js').Telemetry[] = []
+  const session = new CodexSession(new StdioRpc(process.execPath, [fixture, 'metadata']), {
+    cwd: process.cwd(), onTelemetry: value => snapshots.push(value),
+  })
+  try {
+    await session.initialize()
+    assert.match(await session.command('model', ''), /fixture-model/)
+    await session.command('model', 'other-model')
+    await session.run('check-model')
+    assert.equal(snapshots.at(-1)?.usage?.total, 120)
+    assert.equal(snapshots.some(value => value.usage?.total === 999), false)
+  } finally { await session.close() }
+})
+
+test('压缩等待原生完成，拒绝重叠轮次；重命名不发送模型消息', async () => {
+  const session = setup('commands')
+  try {
+    await session.initialize()
+    const compacting = session.command('compact', '')
+    await assert.rejects(session.run('overlap'), /忙碌/)
+    assert.match(await compacting, /完成/)
+    assert.match(await session.command('rename', 'test-name'), /test-name/)
+    assert.equal((await session.run('normal')).text, '回答1')
+  } finally { await session.close() }
+})

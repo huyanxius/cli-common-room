@@ -59,3 +59,12 @@ test('忽略温和终止的自有进程仍会被关闭，不遗留后台进程',
   await rpc.close()
   await assert.rejects(rpc.request('first', {}), /关闭/)
 })
+
+test('只读状态查询超时不关闭聊天连接，后续握手仍可完成', async () => {
+  const rpc = new StdioRpc(process.execPath, [fixture], { timeoutMs: 100 })
+  try {
+    await assert.rejects(rpc.request('hang', {}, { readOnly: true }), /超时/)
+    const result = await rpc.request('initialize', {})
+    assert.equal((result as { userAgent: string }).userAgent, 'fixture/1')
+  } finally { await rpc.close() }
+})
