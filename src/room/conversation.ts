@@ -1,3 +1,5 @@
+import type { Telemetry } from './telemetry.js'
+export interface NativeCommand { name: string; description: string }
 export interface SessionEvent { type: 'text' | 'tool' | 'notice'; text: string }
 export type InteractionPrompt = {
   readonly title: string
@@ -9,6 +11,10 @@ export type InteractionPrompt = {
 )
 export interface SessionOptions {
   cwd: string
+  resumeThreadId?: string
+  onCommands?: (commands: NativeCommand[]) => void
+  onDisconnect?: (error: Error) => void
+  onTelemetry?: (value: Telemetry) => void
   turnTimeoutMs?: number
   onEvent?: (event: SessionEvent) => void
   interact?: (prompt: InteractionPrompt) => Promise<string>
@@ -17,6 +23,7 @@ export interface TurnResult { status: 'completed' | 'cancelled' | 'failed'; text
 export interface Conversation {
   initialize(): Promise<{ threadId: string; model: string }>
   run(text: string): Promise<TurnResult>
+  command?(name: string, argument: string): Promise<string>
   cancel(): Promise<void>
   close(): Promise<void>
 }
