@@ -16,3 +16,11 @@ test('终端入口报告不可用状态，帮助可读；未知命令不冒充�
   assert.equal(invalid.status, 2)
   assert.match(invalid.stderr, /不支持/)
 })
+
+
+test('连接检查的启动失败返回非零退出码且不报告成功', () => {
+  const failed = spawnSync(process.execPath, [entry.pathname, '--check-codex', '--codex-bin', '/nonexistent/common-room-cli'], { encoding: 'utf8' })
+  assert.equal(failed.status, 1)
+  assert.match(failed.stderr, /启动失败/)
+  assert.doesNotMatch(failed.stdout, /成功/)
+})
