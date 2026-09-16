@@ -1,7 +1,7 @@
 import type { AgentRegistry } from '../room/agent.js'
 
 export function renderStatus(agents: AgentRegistry): string {
-  const names = { claude: 'Claude Code', codex: 'Codex' }
+  const names = { claude: 'Claude Code', codex: 'Codex', agy: 'AGY' }
   const lines = Object.values(agents).map(agent => agent.status === 'unavailable'
     ? `  ${names[agent.member]}：未接入 — ${agent.reason}`
     : `  ${names[agent.member]}：已接入`)

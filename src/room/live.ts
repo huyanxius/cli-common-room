@@ -1,14 +1,14 @@
-import { planDeliveries, type MemberId, type HistoryMessage, type MemberSession } from './context.js'
+import { memberIds, planDeliveries, type MemberId, type HistoryMessage, type MemberSession } from './context.js'
 import type { Conversation, SessionOptions, TurnResult } from './conversation.js'
 export interface RoomSnapshot { version: 1; history: HistoryMessage[]; bindings: MemberSession[]; uncertain: MemberId[] }
 export function validateSnapshot(snapshot: RoomSnapshot): void {
   if (snapshot.version !== 1 || !Array.isArray(snapshot.history) || !Array.isArray(snapshot.bindings) || !Array.isArray(snapshot.uncertain)) throw new Error('房间记录格式不兼容')
   if (snapshot.history.some(message => !message || typeof message.text !== 'string')) throw new Error('历史消息格式无效')
-  if (snapshot.uncertain.some(member => !['codex', 'claude'].includes(member))) throw new Error('未知成员')
+  if (snapshot.uncertain.some(member => !memberIds.includes(member))) throw new Error('未知成员')
   if (snapshot.bindings.length) planDeliveries('current', snapshot.history, snapshot.bindings, snapshot.bindings.map(binding => binding.member))
   else if (snapshot.history.length) throw new Error('房间历史缺少会话绑定')
 }
-export type ConversationFactories = Record<MemberId, (options: SessionOptions) => Conversation>
+export type ConversationFactories = Partial<Record<MemberId, (options: SessionOptions) => Conversation>>
 export class ConversationRoom {
   private history: HistoryMessage[] = []
   private sessions = new Map<MemberId, Conversation>()
@@ -33,7 +33,9 @@ export class ConversationRoom {
     const existing = this.sessions.get(member)
     if (existing) return existing
     const binding = this.bindings.get(member)
-    const session = this.factories[member]({ ...this.options(member), ...(binding?.nativeSessionId ? { resumeThreadId: binding.nativeSessionId } : {}) })
+    const factory = this.factories[member]
+    if (!factory) throw new Error(`成员 ${member} 尚未接入`)
+    const session = factory({ ...this.options(member), ...(binding?.nativeSessionId ? { resumeThreadId: binding.nativeSessionId } : {}) })
     this.connecting.add(session)
     try {
       const metadata = await session.initialize()

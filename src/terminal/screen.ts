@@ -9,7 +9,7 @@ export interface ScreenState {
   activity?: string; pickerTitle?: string; queue?: string[]; queuePaused?: boolean; expandTools?: boolean; tick?: number; member?: string; secret?: boolean; menuIndex?: number; members?: { name: string; telemetry: Telemetry }[]; telemetry: Telemetry; cwd: string; git: string; status: string; messages: Message[]
   editor: Editor; scroll: number; menu: string[]; promptTitle: string; seconds: number
 }
-export interface Line { text: string; tone: 'bright' | 'muted' | 'accent' | 'codex' | 'claude' }
+export interface Line { text: string; tone: 'bright' | 'muted' | 'accent' | 'codex' | 'claude' | 'agy' }
 const wrapped = new WeakMap<Message, { text: string; columns: number; lines: string[] }>()
 function messageLines(message: Message, columns: number): string[] {
   const cached = wrapped.get(message)
@@ -22,7 +22,7 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
   const line = (text = '', tone: Line['tone'] = 'muted'): Line => ({ text: fit(text, cols), tone })
   // 历史正文先不裁切补齐，滚动窗口切出可见行后再 fit：打字、滚轮每次都重绘，逐行 fit 全部历史会随会话长度线性变慢。
   const raw = (text = '', tone: Line['tone'] = 'muted'): Line => ({ text, tone })
-  const accent = state.promptTitle.toLowerCase().startsWith('claude') || state.member === 'Claude Code' ? 'claude' : state.member === 'Codex + Claude Code' ? 'accent' : 'codex'
+  const accent = state.promptTitle.toLowerCase().startsWith('agy') || state.member === 'AGY' ? 'agy' : state.promptTitle.toLowerCase().startsWith('claude') || state.member === 'Claude Code' ? 'claude' : state.members ? 'accent' : 'codex'
   const activity = ['Connecting', 'Running', 'Stopping'].includes(state.status) ? `${['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][(state.tick ?? 0) % 10]} ` : ''
   const head = [line(`COMMON ROOM  /  ${activity}${state.status}${state.seconds ? ` ${state.seconds}s` : ''}  /  ${state.telemetry.model ?? '连接中'}`, 'bright')]
   if (height >= 18) {
@@ -33,7 +33,7 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
       const value = member.telemetry
       const context = value.usage?.contextWindow ? ` · 上下文 ${Math.round(value.usage.last / value.usage.contextWindow * 100)}%` : ''
       const tokens = value.usage ? ` · ${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value.usage.total)} tokens` : ''
-      head.push(line(`  ${member.name}  ${value.model ?? '尚未连接'}${value.effort ? ` · ${value.effort}` : ''}${context}${tokens}${value.billing ? ` · ${value.billing}` : ''}`, member.name === 'Claude Code' ? 'claude' : 'codex'))
+      head.push(line(`  ${member.name}  ${value.model ?? '尚未连接'}${value.effort ? ` · ${value.effort}` : ''}${context}${tokens}${value.billing ? ` · ${value.billing}` : ''}`, member.name === 'Claude Code' ? 'claude' : member.name === 'AGY' ? 'agy' : 'codex'))
       const meters = value.quotaError || quotaMeters(value.quotas ?? [], cols < 100 ? 4 : 8) || '订阅额度待检测 · /usage 刷新'
       const meterRows = wrap(meters, Math.max(1, cols - 4))
       head.push(...meterRows.slice(0, height >= 24 ? 2 : 1).map(text => line(`  ${text}`)))
@@ -59,7 +59,7 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
   let body: Line[] = []
   if (state.messages.length) {
     for (const message of state.messages) {
-      const tone = message.role.startsWith('Codex') ? 'codex' : message.role.startsWith('Claude') ? 'claude' : 'muted'
+      const tone = message.role.startsWith('Codex') ? 'codex' : message.role.startsWith('Claude') ? 'claude' : message.role.startsWith('AGY') ? 'agy' : 'muted'
       if (message.tool) {
         const tool = message.tool, summary = toolSummary(tool)
         const icon = tool.status === 'running' ? ['⠋', '⠙', '⠹', '⠸'][(state.tick ?? 0) % 4] : tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'cancelled' ? '■' : '?'
