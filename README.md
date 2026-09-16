@@ -44,7 +44,7 @@ Claude 初次引导默认选择本机登录，避免启动环境中的 `CLAUDE_C
 | 停止当前任务 | Esc / Ctrl+C 调用原生取消；空闲时 Ctrl+C 退出 |
 | 新房间 | `/new` 或 `/clear`，重建原生上下文 |
 | 仅清空可见消息 | `/screen-clear` |
-| 恢复房间 | `/resume` 列表，`/resume <ID>` 恢复 |
+| 恢复房间 | `/resume` 打开历史列表，↑↓ 选择、Enter 恢复、Esc 返回 |
 | 查看完整状态、差异 | `/status`、`/diff` |
 | 退出 | `/exit` 或空闲时 Ctrl+C |
 

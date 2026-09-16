@@ -32,11 +32,21 @@ with tempfile.TemporaryDirectory() as root:
         wait_for('Ready')
         send('\x14');wait_for('output-59')
         send('\x1b[<64;10;5M');wait_for('阅读历史')
+        send('/new\r');time.sleep(.3)
+        send('/resume\r');wait_for('恢复会话');wait_for('queued')
+        send('\x1b');time.sleep(.15)
+        events=[json.loads(line) for line in open(trace)]
+        assert not any(e.get('resume') for e in events),events
+        send('/resume\r');wait_for('恢复会话')
+        send('\r');wait_for('房间已恢复')
+        events=[json.loads(line) for line in open(trace)]
+        assert {e['member'] for e in events if e.get('resume')}=={'codex','claude'},events
+        send('@claude after resume\r');wait_for('TURN_STARTED_claude');wait_for('Ready')
         send('/exit\r');wait_for('TUI_EXITED')
         assert process.wait(timeout=3)==0
         assert termios.tcgetattr(slave)==before
         events=[json.loads(line) for line in open(trace)]
-        assert [e['member'] for e in events if e['type']=='run']==['codex','codex','claude']
+        assert [e['member'] for e in events if e['type']=='run']==['codex','codex','claude','claude']
         print('PTY model, effort, recipient, queue, Escape, tool expansion and wheel passed')
     finally:
         if process.poll() is None: process.terminate();process.wait(timeout=3)
