@@ -50,11 +50,14 @@ export class StdioRpc {
     this.child.stderr.resume()
   }
 
-  async request(method: string, params: unknown): Promise<unknown> {
+  async request(method: string, params: unknown, options: { readOnly?: boolean } = {}): Promise<unknown> {
     if (this.stopped) throw new Error('原生连接已关闭')
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.stop(new Error('原生请求超时，执行结果未知；不会自动重试')), this.timeoutMs)
+      const timer = setTimeout(() => {
+        if (options.readOnly) { this.pending.delete(id); reject(new Error('原生状态查询超时')) }
+        else this.stop(new Error('原生请求超时，执行结果未知；不会自动重试'))
+      }, this.timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
       this.write({ id, method, params })
     })
