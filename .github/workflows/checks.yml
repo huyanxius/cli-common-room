@@ -28,6 +28,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Detect code changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          code=true
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"
+            if ! grep -Eq '^(src/|tests/|package(-lock)?\.json$|tsconfig\.json$|\.nvmrc$|\.github/(scripts/|workflows/))' "$RUNNER_TEMP/changed-files"; then
+              code=false
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: Install locked development dependencies
+        if: steps.changes.outputs.code == 'true'
+        run: npm ci
+      - name: Check application types
+        if: steps.changes.outputs.code == 'true'
+        run: npm run typecheck
+      - name: Build and test application
+        if: steps.changes.outputs.code == 'true'
+        run: npm test
       - name: Check validation logic
         run: node --test .github/scripts/check.test.cjs
       - name: Check relative document links
