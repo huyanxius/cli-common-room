@@ -21,6 +21,7 @@
     "string-width": "7.2.0"
   },
   "bin": {
+    "room": "bin/common-room.mjs",
     "common-room": "bin/common-room.mjs"
   }
 }

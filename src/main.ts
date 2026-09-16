@@ -3,7 +3,7 @@ import { createApplication } from './app.js'
 import { terminalWorkspace } from './terminal/workspace.js'
 
 const args = process.argv.slice(2)
-const help = `用法：common-room [--codex-bin 路径] [--claude-bin 路径]
+const help = `用法：room [--codex-bin 路径] [--claude-bin 路径]
 
 在当前工作目录打开 Claude Code 与 Codex 的统一 TUI。
 /to codex|claude|all 选择接收者；输入 / 浏览当前成员的命令。
@@ -32,8 +32,8 @@ try {
     } else throw new Error('不支持此命令。使用 --help 查看帮助。')
   }
   if (mode === 'help') console.log(help)
-  else if (mode === 'version') console.log('common-room 0.0.0')
-  else if (mode === 'status') console.log('Claude Code：本机 CLI + 官方 SDK\nCodex：本机 app-server\n运行 common-room 连接当前工作区；状态列表不代表认证或模型请求已验证。')
+  else if (mode === 'version') console.log('room 0.0.0')
+  else if (mode === 'status') console.log('Claude Code：本机 CLI + 官方 SDK\nCodex：本机 app-server\n运行 room 连接当前工作区；状态列表不代表认证或模型请求已验证。')
   else if (mode === 'check-codex') {
     try { await createApplication().checkCodexConnection(codexBin); console.log('Codex 原生协议握手成功。未发送模型请求。') }
     catch (error) { console.error(error instanceof Error ? error.message : '连接失败'); process.exitCode = 1 }

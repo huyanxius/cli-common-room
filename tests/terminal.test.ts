@@ -37,7 +37,7 @@ test('包装命令默认进入 TUI，帮助和版本不要求交互终端', () =
   const bin = new URL('../../bin/common-room.mjs', import.meta.url).pathname
   const help = spawnSync(process.execPath, [bin, '--help'], { encoding: 'utf8' })
   assert.equal(help.status, 0)
-  assert.match(help.stdout, /common-room/)
+  assert.match(help.stdout, /用法：room /)
   const normal = spawnSync(process.execPath, [bin], { encoding: 'utf8' })
   assert.equal(normal.status, 1)
   assert.match(normal.stderr, /交互终端/)
