@@ -56,6 +56,10 @@ Terminal.app 内的群聊 TUI        后续网页客户端
 | `src/room/service.ts` | 统一检查接收者、会话及成员可用性 | 发送、取消、忙碌成员和轮次状态 |
 | `src/room/agent.ts` | 协调层需要的文本、工具、会话和结束事件；适配器接口 | 按真实协议补充审批与提问，未能表达的事件不得丢弃 |
 | `src/runtime/stdio-rpc.ts` | stdio 子进程通信、请求关联、超时和关闭 | 随真实轮次接入扩展事件消费 |
+| `src/adapters/codex/session.ts` | 原生线程、轮次、事件归属与取消 | 接入统一群聊交付计划 |
+| `src/adapters/codex/interaction.ts` | 原生授权及提问映射为明确选项 | 其他原生交互按协议逐项验证 |
+| `src/room/conversation.ts` | 终端会话的事件与交互接口 | 由群聊协调层复用 |
+| `src/terminal/native-chat.ts` | 单成员发送、流式输出、授权选择和停止 | 全屏 TUI 与多成员选择 |
 | `src/adapters/codex/check.ts` | 本机 Codex initialize/initialized 握手 | 会话、轮次与审批协议 |
 | `src/adapters/index.ts` | 注册 Claude Code 与 Codex 的接入状态 | 分设 Claude 流式接口与 Codex app-server 实现 |
 | `src/terminal/status.ts` | 展示成员状态 | 消息阅读、输入和成员授权交互 |
@@ -68,7 +72,9 @@ Terminal.app 内的群聊 TUI        后续网页客户端
 
 接收者由调用参数明确指定，正文中的点名不会触发派发。跨群历史、跨群会话、重复成员、无接收者和非法游标立即拒绝。已有成员回复或非零游标时，不能用空原生会话 ID 冒充恢复成功；恢复失败必须另行处理。
 
-原生 Agent 尚未接入时，只注册明确的不可用状态，不创建伪适配器。`RoomService.prepare` 在任一选中成员不可用时拒绝整批准备，避免用户选择双方却悄悄只发给一方。正常准备也不等于已经执行；当前没有生产发送、恢复或权限处理实现。显式连接检查只完成 Codex 协议握手，不将成员注册为 ready。通信层对当前未支持的服务端请求返回明确错误；真实轮次接入前必须补齐审批处理。请求超时后关闭连接并报告结果未知，不自动重试。
+原生 Agent 尚未接入时，只注册明确的不可用状态，不创建伪适配器。`RoomService.prepare` 在任一选中成员不可用时拒绝整批准备，避免用户选择双方却悄悄只发给一方。正常准备也不等于已经执行；统一群聊尚未连接真实发送与恢复；独立的 Codex 会话入口已实现 thread/start、turn/start 与 turn/interrupt。每个会话最多一个活动轮次，开始请求返回前的通知先缓存，再按原生 threadId 和 turnId 过滤。只有 turn/completed 的明确状态才结束本轮，文本增量不能代表成功。
+
+单成员入口通过独立的 conversation 接口提供交互，Codex 适配器负责将命令/文件授权、用户提问映射为通用选项。回答回传前再次核对活动轮次与取消信号；未支持交互明确失败。终端文本过滤控制字符，不把工具或模型输出解释为控制序列。握手检查不将群聊成员注册为 ready；请求超时或轮次超时均关闭连接并报告结果未知，不自动重试。
 
 运行环境使用 Node.js 22.14+（22.x）、严格模式 TypeScript 与 ESM。Node 原生测试运行器执行编译后的测试，不引入 TUI、Agent SDK 或数据库依赖。类型检查、构建和业务测试进入代码变更 CI；纯文档变更只执行仓库检查。
 
