@@ -5,6 +5,7 @@ export interface RpcOptions {
   readonly env?: NodeJS.ProcessEnv
   readonly timeoutMs?: number
 }
+export type ServerRequestHandler = (method: string, params: unknown, signal: AbortSignal) => Promise<unknown>
 interface Pending {
   resolve(value: unknown): void
   reject(error: Error): void
@@ -17,6 +18,10 @@ export class StdioRpc {
   private readonly pending = new Map<number, Pending>()
   private readonly exited: Promise<void>
   private readonly timeoutMs: number
+  private readonly notifications = new Set<(method: string, params: unknown) => void>()
+  private readonly closeListeners = new Set<(error: Error) => void>()
+  private readonly lifetime = new AbortController()
+  private requestHandler: ServerRequestHandler | undefined
   private nextId = 1
   private buffer = ''
   private stopped = false
@@ -53,6 +58,23 @@ export class StdioRpc {
       this.pending.set(id, { resolve, reject, timer })
       this.write({ id, method, params })
     })
+  }
+
+  onNotification(listener: (method: string, params: unknown) => void): () => void {
+    this.notifications.add(listener)
+    return () => { this.notifications.delete(listener) }
+  }
+
+  onClose(listener: (error: Error) => void): () => void {
+    if (this.stopped) listener(new Error('原生连接已关闭'))
+    else this.closeListeners.add(listener)
+    return () => { this.closeListeners.delete(listener) }
+  }
+
+  onRequest(handler: ServerRequestHandler): () => void {
+    if (this.requestHandler) throw new Error('服务端请求已有处理者')
+    this.requestHandler = handler
+    return () => { if (this.requestHandler === handler) this.requestHandler = undefined }
   }
 
   notify(method: string): void {
@@ -93,8 +115,17 @@ export class StdioRpc {
     const message = value as Record<string, unknown>
     if (typeof message.method === 'string') {
       if (typeof message.id === 'string' || typeof message.id === 'number') {
-        // 握手诊断不支持审批等服务端请求；明确失败，禁止静默批准。
-        this.write({ id: message.id, error: { code: -32601, message: 'This client does not support server requests yet' } })
+        const id = message.id
+        const handler = this.requestHandler
+        if (!handler) {
+          this.write({ id, error: { code: -32601, message: 'Unsupported server request' } })
+        } else {
+          Promise.resolve().then(() => handler(message.method as string, message.params, this.lifetime.signal))
+            .then(result => { if (!this.stopped) this.write({ id, result }) })
+            .catch(() => { if (!this.stopped) this.write({ id, error: { code: -32603, message: 'Server request was not completed' } }) })
+        }
+      } else {
+        for (const listener of this.notifications) listener(message.method, message.params)
       }
       return
     }
@@ -114,6 +145,10 @@ export class StdioRpc {
   private stop(error: Error): void {
     if (this.stopped) return
     this.stopped = true
+    this.lifetime.abort()
+    for (const listener of this.closeListeners) listener(error)
+    this.closeListeners.clear()
+    this.notifications.clear()
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(error)

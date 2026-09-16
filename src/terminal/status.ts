@@ -10,7 +10,7 @@ export function renderStatus(agents: AgentRegistry): string {
     '',
     ...lines,
     '',
-    '当前仅可查看接入状态，尚不能发送群聊消息。',
+    '使用 --codex-chat 进入 Codex 单成员会话；完整群聊尚未接入。',
     '使用 --help 查看命令。',
   ].join('\n')
 }
