@@ -14,6 +14,7 @@ export async function inspectNative(member: MemberId, executable: string, option
     return { installed: !missing, auth: 'unknown', version: '', detail: missing ? '未找到程序 · 配置路径或安装后重新检测' : '程序检测失败 · 检查路径、权限或重试' }
   }
   let stdout = '', stderr = '', code = 0
+  if (member === 'agy') return { installed: true, auth: 'unknown', version, detail: '沿用 AGY 原生认证；请先在 agy 完成登录。流式接口不提供交互审批，需审批的工具由原生拒绝。' }
   try {
     const result = await exec(executable, member === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'], { ...options, timeout: 10000, maxBuffer: 65536 })
     stdout = result.stdout; stderr = result.stderr
@@ -33,6 +34,7 @@ export async function inspectNative(member: MemberId, executable: string, option
   return { installed: true, auth, version, detail: auth === 'signed-in' ? '检测到原生认证 · 尚未验证模型请求' : auth === 'signed-out' ? '未登录 · 选择浏览器登录' : '认证状态未确认 · 可重新检测或使用现有配置连接' }
 }
 export function loginNative(member: MemberId, executable: string, options: NativeOptions & { onOutput(text: string): void; method?: 'browser' | 'device' | 'console' }): NativeLogin {
+  if (member === 'agy') throw new Error('AGY 未提供程序化登录接口，请在原生 agy 完成登录后重新连接')
   const args = member === 'claude' ? ['auth', 'login', options.method === 'console' ? '--console' : '--claudeai'] : ['login', ...(options.method === 'device' ? ['--device-auth'] : [])]
   const child = spawn(executable, args, { ...(options.env ? { env: options.env } : {}), ...(options.cwd ? { cwd: options.cwd } : {}), shell: false, stdio: 'pipe' })
   let cancelled = false, output = '', killTimer: ReturnType<typeof setTimeout> | undefined

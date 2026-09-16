@@ -1,11 +1,11 @@
-import { MessageQueue, parseRecipient, type Recipient } from './queue.js'
+import { MessageQueue, parseRecipient, recipients, mentions, type Recipient } from './queue.js'
 import { authenticationEnv, inspectNative, loginNative, type NativeLogin } from '../runtime/native-auth.js'
 import { SetupPreferences, type SetupSettings } from '../storage/setup.js'
 import { createSetup, renderSetup, setupActions } from './setup.js'
 import { RoomArchive } from '../storage/archive.js'
 import type { InteractionPrompt, SessionOptions, NativeCommand } from '../room/conversation.js'
 import { ConversationRoom, type ConversationFactories } from '../room/live.js'
-import type { MemberId } from '../room/context.js'
+import { memberIds, memberNames, type MemberId } from '../room/context.js'
 import type { Telemetry } from '../room/telemetry.js'
 import { workspaceStatus, workspaceDiff } from '../runtime/workspace.js'
 import { emptyEditor, edit } from './editor.js'
@@ -19,7 +19,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('聊天需要交互终端')
   const state: ScreenState = { telemetry: {}, cwd: process.cwd(), git: '读取工作树…', status: 'Connecting', messages: [], editor: emptyEditor(), scroll: 0, menu: [], promptTitle: '', seconds: 0 }
   const setup = createSetup()
-  if (configuration) { setup.binaries = configuration.settings.binaries; setup.authSource = configuration.settings.authSource ?? 'native' }
+  if (configuration) { configuration.settings.binaries.agy ??= 'agy'; setup.binaries = configuration.settings.binaries as Record<MemberId, string>; setup.authSource = configuration.settings.authSource ?? 'native' }
   let showingSetup = !!configuration, setupGeneration = 0, connectionsChanged = false, setupConnecting = false
   let login: NativeLogin | undefined
   let interactionIndex = -1
@@ -27,10 +27,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
   let tick = 0
   const queue = new MessageQueue()
   let menuIndex = 0
-  let selected: MemberId | 'all' = 'codex'
-  const telemetry: Record<MemberId, Telemetry> = { codex: {}, claude: {} }
-  const usageChecked: Record<MemberId, number> = { codex: 0, claude: 0 }
-  const catalogs: Record<MemberId, NativeCommand[]> = { codex: [], claude: [] }
+  let selected: Recipient = 'codex'
+  const available = memberIds.filter(id => factories[id])
+  const targets = (value: Recipient = selected): MemberId[] => recipients(value, available)
+  const single = (): MemberId | undefined => targets().length === 1 ? targets()[0] : undefined
+  const label = (value: Recipient): string => targets(value).map(member => memberNames[member]).join(' + ')
+  const selectedTelemetry = (): Telemetry => single() ? telemetry[single()!] : { model: targets().map(id => telemetry[id].model ?? '—').join(' + ') }
+  const telemetry: Record<MemberId, Telemetry> = { codex: {}, claude: {}, agy: {} }
+  const usageChecked: Record<MemberId, number> = { codex: 0, claude: 0, agy: 0 }
+  const catalogs: Record<MemberId, NativeCommand[]> = { codex: [], claude: [], agy: [] }
   let archive = new RoomArchive(state.cwd)
   let room: ConversationRoom
   let busy = false, stopping = false, suspended = false, finished = false, ready = false
@@ -42,18 +47,19 @@ export async function terminalWorkspace(factories: ConversationFactories, config
   const exited = new Promise<void>(resolve => { resolveExit = resolve })
   let cancelTimer: ReturnType<typeof setTimeout> | undefined
   let scheduled: ReturnType<typeof setTimeout> | undefined
-  const colors = { bright: '\x1b[0;39;49m', muted: '\x1b[0;2;39;49m', accent: '\x1b[0;39;49m', codex: '\x1b[0;38;5;141m', claude: '\x1b[0;38;5;173m' }
-  const inputMenu = (): string[] => state.editor.text.startsWith('@') && !state.editor.text.includes(' ') ? ['@all  双方', '@codex  Codex', '@claude  Claude Code'].filter(item => item.startsWith(state.editor.text)) : matchingCommands(state.editor.text, selected === 'all' ? [] : catalogs[selected])
+  const colors = { bright: '\x1b[0;39;49m', muted: '\x1b[0;2;39;49m', accent: '\x1b[0;39;49m', codex: '\x1b[0;38;5;141m', claude: '\x1b[0;38;5;173m', agy: '\x1b[0;38;5;108m' }
+  const mentionPrefix = (): string | undefined => /(?:^|\s)(@[a-z]*)$/.exec(graphemes(state.editor.text).slice(0, state.editor.cursor).join(''))?.[1]
+  const inputMenu = (): string[] => mentionPrefix() !== undefined ? ['@all  全部成员', ...available.map(id => `@${id}  ${memberNames[id]}`)].filter(item => item.startsWith(mentionPrefix()!)) : matchingCommands(state.editor.text, single() ? catalogs[single()!] : [])
   const draw = (): void => {
     if (suspended || finished) return
     state.menuIndex = menuIndex
-    if (selected === 'all') state.members = [{ name: 'Codex', telemetry: telemetry.codex }, { name: 'Claude Code', telemetry: telemetry.claude }]
+    if (!single()) state.members = targets().map(id => ({ name: memberNames[id], telemetry: telemetry[id] }))
     else delete state.members
     state.menu = interaction ? (interaction.prompt.kind === 'approval' ? interaction.prompt.choices.map(item => item.label) : interaction.prompt.options.map(item => `${item.label}  ${item.description}`)) : picker ? picker.choices.map(choice => `${choice.current ? '●' : '○'} ${choice.label}  ${choice.description}`) : inputMenu()
     if (interaction) state.menuIndex = interactionIndex
     if (picker) state.menuIndex = picker.index
     state.pickerTitle = picker?.name === 'resume' ? '恢复会话 · ↑↓ 选择 · Enter 恢复 · Esc 返回' : picker ? `${picker.member} · 选择${picker.name === 'model' ? '模型' : picker.name === 'queue' ? '队列操作' : '思考强度'} · ↑↓ Enter 确认 · Esc 返回` : ''
-    state.queue = queue.items.map(item => `@${item.recipient}  ${item.text.replace(/\n/g, ' ')}`); state.queuePaused = queue.paused
+    state.queue = queue.items.map(item => `${mentions(item.recipient)}  ${item.text.replace(/\n/g, ' ')}`); state.queuePaused = queue.paused
     state.seconds = busy && started ? Math.floor((Date.now() - started) / 1000) : 0
     state.tick = tick
     const frame = showingSetup ? renderSetup(setup, process.stdout.columns || 80, process.stdout.rows || 24, tick) : renderScreen(state, process.stdout.columns || 80, process.stdout.rows || 24)
@@ -110,16 +116,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     cwd: state.cwd,
     ...(member === 'claude' ? { env: authenticationEnv(setup.authSource) } : {}),
     interact: prompt => interact(prompt),
-    onDisconnect: () => { if (finished || connectionsChanged) return; if (selected === member || selected === 'all') { ready = false; connectionsChanged = true; state.status = 'Disconnected'; redraw() } },
+    onDisconnect: () => { if (finished || connectionsChanged) return; if (targets().includes(member)) { ready = false; connectionsChanged = true; state.status = 'Disconnected'; redraw() } },
     onCommands: commands => { catalogs[member] = commands; redraw() },
     onTelemetry: update => {
       telemetry[member] = { ...telemetry[member], ...update }
-      if (selected === member) state.telemetry = telemetry[member]
-      else if (selected === 'all') state.telemetry = { model: `${telemetry.codex.model ?? '—'} + ${telemetry.claude.model ?? '—'}` }
+      state.telemetry = selectedTelemetry()
       redraw()
     },
     onEvent: event => {
-      const label = member === 'claude' ? 'Claude Code' : 'Codex'
+      const label = memberNames[member]
       state.activity = event.type === 'tool' ? `${label} · 执行 ${event.tool?.name || '工具'}` : `${label} · 正在回复`
       if (event.type === 'text') {
         if (!currentReply || currentReply.role !== label) { currentReply = { role: label, text: '' }; state.messages.push(currentReply) }
@@ -142,14 +147,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     },
   })
   room = new ConversationRoom(factories, options, snapshot => archive.save(snapshot))
-  const select = async (member: MemberId | 'all'): Promise<void> => {
+  const select = async (member: Recipient): Promise<void> => {
     ready = false; state.status = 'Connecting'; redraw()
-    const recipients: MemberId[] = member === 'all' ? ['codex', 'claude'] : [member]
+    const recipients = targets(member)
     for (const recipient of recipients) await room.connect(recipient)
-    selected = member; state.member = member === 'all' ? 'Codex + Claude Code' : member === 'claude' ? 'Claude Code' : 'Codex'
-    state.telemetry = member === 'all' ? { model: `${telemetry.codex.model ?? '—'} + ${telemetry.claude.model ?? '—'}` } : telemetry[member]
+    selected = member; state.member = label(member)
+    state.telemetry = selectedTelemetry()
     ready = true; state.status = 'Ready'; redraw()
     for (const recipient of recipients) {
+      if (recipient === 'agy') { try { await room.command(recipient, 'model', '') } catch { /* 不把本机默认值猜成当前模型。 */ } }
       try { await room.command(recipient, 'usage', ''); usageChecked[recipient] = Date.now() } catch { telemetry[recipient].quotaError = '订阅额度不可用 · /usage 重试' }
       try { await room.command(recipient, 'skills', '') } catch { /* 目录不可用时保留已验证的内置命令。 */ }
     }
@@ -158,7 +164,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
   const refreshSetup = async (): Promise<void> => {
     const generation = ++setupGeneration
     setup.pending = true; setup.status = '检测本机程序与登录状态…'; setup.index = 0; redraw()
-    const members: MemberId[] = setup.view === 'welcome' ? ['codex', 'claude'] : [setup.view]
+    const members = setup.view === 'welcome' ? memberIds : [setup.view]
     try {
       await Promise.all(members.map(async member => {
         const result = await inspectNative(member, setup.binaries[member], { cwd: state.cwd, ...(member === 'claude' ? { env: authenticationEnv(setup.authSource) } : {}) })
@@ -177,7 +183,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if (setup.pending) return
       if (id === 'back') { setup.editing = undefined; setup.input = ''; setup.view = 'welcome'; setup.output = ''; setup.index = 0; return }
       if (id === 'close') { if (ready) showingSetup = false; else await stop(); return }
-      if (id === 'codex' || id === 'claude') { setup.view = id; setup.index = 0; setup.output = ''; return }
+      if (memberIds.includes(id as MemberId)) { setup.view = id as MemberId; setup.index = 0; setup.output = ''; return }
       if (id === 'refresh') { await refreshSetup(); return }
       if (id === 'source') { setup.authSource = setup.authSource === 'inherit' ? 'native' : 'inherit'; connectionsChanged = true; await refreshSetup(); return }
       if (id === 'path' && setup.view !== 'welcome') { setup.editing = 'path'; setup.input = setup.binaries[setup.view]; setup.inputCursor = graphemes(setup.input).length; setup.index = 0; return }
@@ -200,7 +206,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       }
       if (id === 'all' || id.startsWith('use-')) {
         const member = id === 'all' ? 'all' : id.slice(4) as MemberId
-        const members: MemberId[] = member === 'all' ? ['codex', 'claude'] : [member]
+        const members = targets(member)
         if (members.some(value => setup.members[value]?.installed === false)) throw new Error('所选成员程序不可用，请先配置路径')
         const generation = ++setupGeneration
         setup.pending = true; setupConnecting = true; setup.status = '连接原生会话…'; redraw()
@@ -208,7 +214,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
           if (connectionsChanged) {
             const snapshot = room.snapshot(); await room.close()
             room = new ConversationRoom(factories, options, value => archive.save(value), snapshot)
-            telemetry.codex = {}; telemetry.claude = {}; connectionsChanged = false
+            telemetry.codex = {}; telemetry.claude = {}; telemetry.agy = {}; connectionsChanged = false
           }
           await select(member)
           if (generation !== setupGeneration || finished) return
@@ -228,15 +234,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if (!answer) { note('请选择有效编号。'); return }
       target.dispose(); interaction = undefined; target.resolve(answer); return
     }
-    const routed = parseRecipient(text, recipientOverride ?? selected)
-    if (text.startsWith('@') && routed.text !== text) {
+    const routed = recipientOverride ? { text, recipient: recipientOverride } : parseRecipient(text, selected)
+    if (routed.text !== text) {
       text = routed.text
-      if (!text) { if (busy) { selected = routed.recipient; state.member = selected === 'all' ? 'Codex + Claude Code' : selected === 'claude' ? 'Claude Code' : 'Codex'; redraw() } else { busy = true; try { await select(routed.recipient) } catch (error) { note(String(error)) } finally { busy = false; redraw() } }; return }
+      if (!text) { if (busy) { selected = routed.recipient; state.member = label(selected); state.telemetry = selectedTelemetry(); redraw() } else { busy = true; try { await select(routed.recipient) } catch (error) { note(String(error)) } finally { busy = false; redraw() } }; return }
     }
     if (text === '/queue clear') { queue.clear(); redraw(); return }
-    if (text === '/queue drop') { const item = queue.withdraw(); if (item) state.editor = { ...emptyEditor(), text: `@${item.recipient} ${item.text}`, cursor: graphemes(`@${item.recipient} ${item.text}`).length }; redraw(); return }
+    if (text === '/queue drop') { const item = queue.withdraw(); if (item) state.editor = { ...emptyEditor(), text: `${mentions(item.recipient)} ${item.text}`, cursor: graphemes(`${mentions(item.recipient)} ${item.text}`).length }; redraw(); return }
     if (text === '/queue resume') { queue.resume(); if (!busy) { const item = queue.take(); if (item) void submit(item.text, item.recipient) }; redraw(); return }
-    if (text === '/queue') { picker = { name: 'queue', member: selected === 'all' ? 'codex' : selected, index: 0, choices: [{ value: 'resume', label: '继续队列', description: `${queue.items.length} 条消息` }, { value: 'drop', label: '撤回最后一条到输入框', description: '' }, { value: 'clear', label: '清空队列', description: '' }] }; redraw(); return }
+    if (text === '/queue') { picker = { name: 'queue', member: targets()[0]!, index: 0, choices: [{ value: 'resume', label: '继续队列', description: `${queue.items.length} 条消息` }, { value: 'drop', label: '撤回最后一条到输入框', description: '' }, { value: 'clear', label: '清空队列', description: '' }] }; redraw(); return }
     if (!busy && !queue.items.length) queue.resume()
     if (busy && !text.startsWith('/')) {
       try { queue.add(text, routed.recipient) } catch (error) { state.editor = { ...state.editor, text, cursor: graphemes(text).length }; note(String(error)) }
@@ -249,30 +255,34 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if (text.startsWith('/')) {
         const match = /^\/(\S+)\s*([\s\S]*)$/.exec(text)
         const name = match?.[1] ?? 'help', argument = match?.[2]?.trim() ?? ''
-        if (name === 'setup' || name === 'login') { if (!configuration) throw new Error('当前入口未配置登录服务'); if (argument && !['codex', 'claude'].includes(argument)) throw new Error('用法：/login codex|claude'); openSetup(name === 'login' ? (argument || (selected === 'all' ? 'claude' : selected)) as MemberId : undefined) }
-        else if (name === 'help') note(commands.map(([command, detail]) => `/${command}  ${detail}`).join('\n') + '\n/to codex|claude|all 选择接收者。命令只作用于当前单个成员。Claude 命令目录由原生动态提供。')
+        if (name === 'setup' || name === 'login') { if (!configuration) throw new Error('当前入口未配置登录服务'); if (argument && !memberIds.includes(argument as MemberId)) throw new Error('用法：/login codex|claude|agy'); openSetup(name === 'login' ? (argument || single() || 'claude') as MemberId : undefined) }
+        else if (name === 'help') note(commands.map(([command, detail]) => `/${command}  ${detail}`).join('\n') + '\n@codex @agy 可同时点名；@all 选择全部成员。命令只作用于当前单个成员。')
         else if ((name === 'model' || name === 'effort') && !argument) {
-          if (selected === 'all') throw new Error('先用 @ 选择要设置的成员')
-          const choices = await room.choices(selected, name)
-          if (!choices.length) throw new Error('当前原生模型未提供可选项')
-          picker = { name, member: selected, choices, index: Math.max(0, choices.findIndex(choice => choice.current)) }
+          const member = single()
+          if (!member) throw new Error('先用 @ 选择要设置的单个成员')
+          if (member === 'agy') note(await room.command(member, name, ''))
+          else {
+            const choices = await room.choices(member, name)
+            if (!choices.length) throw new Error('当前原生模型未提供可选项')
+            picker = { name, member, choices, index: Math.max(0, choices.findIndex(choice => choice.current)) }
+          }
         }
         else if (name === 'diff') note(await workspaceDiff(state.cwd))
         else if (name === 'screen-clear') state.messages = []
-        else if (name === 'status') note([state.cwd, state.git, ...(['codex', 'claude'] as const).flatMap(member => [member, `thread ${telemetry[member].threadId ?? '未连接'}`, `model ${telemetry[member].model ?? '未报告'}`, `程序 ${telemetry[member].executable ?? setup.binaries[member]}`, `配置目录 ${telemetry[member].configDirectory ?? '原生默认'}`, `认证选择 ${member === 'claude' ? setup.authSource === 'native' ? '本机登录' : '沿用启动环境' : '原生配置'} · 原生来源 ${telemetry[member].authSource ?? '未报告'} · ${telemetry[member].billing ?? '计费状态未报告'}`,  tokenLine(telemetry[member].usage), ...quotaLines(telemetry[member].quotas ?? [])])].join('\n'))
+        else if (name === 'status') note([state.cwd, state.git, ...memberIds.filter(member => factories[member]).flatMap(member => [memberNames[member], `thread ${telemetry[member].threadId ?? '未连接'}`, `model ${telemetry[member].model ?? '未报告'}`, `程序 ${telemetry[member].executable ?? setup.binaries[member]}`, `配置目录 ${telemetry[member].configDirectory ?? '原生默认'}`, `认证选择 ${member === 'claude' ? setup.authSource === 'native' ? '本机登录' : '沿用启动环境' : '原生配置'} · 原生来源 ${telemetry[member].authSource ?? '未报告'} · ${telemetry[member].billing ?? '计费状态未报告'}`, `权限 ${telemetry[member].approval ?? '未报告'}`, tokenLine(telemetry[member].usage), ...quotaLines(telemetry[member].quotas ?? [])])].join('\n'))
         else if (name === 'to') {
-          if (!['codex', 'claude', 'all'].includes(argument)) throw new Error('用法：/to codex|claude|all')
+          if (![...memberIds, 'all'].includes(argument)) throw new Error('用法：/to codex|claude|agy|all')
           await select(argument as MemberId | 'all')
         }
-        else if (name === 'new' || name === 'clear') { queue.pause(); await room.close(); await archive.release(); archive = new RoomArchive(state.cwd); room = new ConversationRoom(factories, options, snapshot => archive.save(snapshot)); telemetry.codex = {}; telemetry.claude = {}; state.telemetry = {}; state.messages = []; await select(selected) }
+        else if (name === 'new' || name === 'clear') { queue.pause(); await room.close(); await archive.release(); archive = new RoomArchive(state.cwd); room = new ConversationRoom(factories, options, snapshot => archive.save(snapshot)); telemetry.codex = {}; telemetry.claude = {}; telemetry.agy = {}; state.telemetry = {}; state.messages = []; await select(selected) }
         else if (name === 'resume') {
           if (!argument) {
             const entries = (await archive.list()).filter(item => item.id !== archive.id && item.count > 0)
             if (!entries.length) note('当前工作区暂无可恢复的历史会话。')
-            else picker = { name: 'resume', member: selected === 'all' ? 'codex' : selected, index: 0, choices: entries.map(item => ({
+            else picker = { name: 'resume', member: targets()[0]!, index: 0, choices: entries.map(item => ({
               value: item.id,
               label: graphemes(clean(item.preview)).slice(0, 32).join('') || '空会话',
-              description: `${item.members.map(member => member === 'claude' ? 'Claude Code' : 'Codex').join(' + ')} · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${item.count} 条`,
+              description: `${item.members.map(member => memberNames[member as MemberId]).join(' + ')} · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · ${item.count} 条`,
             })) }
           }
           else {
@@ -281,22 +291,23 @@ export async function terminalWorkspace(factories: ConversationFactories, config
             const restored = new RoomArchive(state.cwd)
             const snapshot = await restored.load(argument)
             await room.close(); await archive.release(); archive = restored
-            telemetry.codex = {}; telemetry.claude = {}
+            telemetry.codex = {}; telemetry.claude = {}; telemetry.agy = {}
             room = new ConversationRoom(factories, options, value => archive.save(value), snapshot)
-            state.messages = snapshot.history.map(message => ({ role: message.author === 'user' ? '你' : message.author === 'claude' ? 'Claude Code' : 'Codex', text: message.text }))
-            await select(snapshot.bindings.length > 1 ? 'all' : snapshot.bindings[0]?.member ?? selected)
+            state.messages = snapshot.history.map(message => ({ role: message.author === 'user' ? '你' : memberNames[message.author], text: message.text }))
+            await select(snapshot.bindings.length ? snapshot.bindings.map(binding => binding.member) : selected)
             note(snapshot.uncertain.length ? '存在交付状态未知的成员，已阻止自动重发。/new 可开始新的房间。' : '房间已恢复，原生上下文与交付位置沿用存档。')
           }
         }
         else {
-          if (selected === 'all') throw new Error('命令需要明确成员，请先 /to codex 或 /to claude')
-          note(await room.command(selected, name, argument))
+          const member = single()
+          if (!member) throw new Error('命令需要明确的单个成员，请先 /to codex、claude 或 agy')
+          note(await room.command(member, name, argument))
           if (name === 'usage') note(quotaLines(state.telemetry.quotas ?? []).join('\n'))
         }
       } else {
         if (routed.recipient !== selected) { await select(routed.recipient); state.status = 'Running' }
         state.messages.push({ role: '你', text })
-        const results = await room.send(routed.recipient === 'all' ? ['codex', 'claude'] : [routed.recipient], text)
+        const results = await room.send(targets(routed.recipient), text)
         for (const { member, result, error } of results) {
           if (error) { queue.pause(); note(`${member}: ${error}`) }
           else if (result?.status !== 'completed') { queue.pause(); note(`${member}: ${result?.status === 'cancelled' ? '已停止；已执行操作不会回滚' : '轮次失败，保留部分内容'}`) }
@@ -372,7 +383,15 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     }
     if ((key.name === 'tab' || (key.name === 'return' && matches.length > 0)) && !interaction) {
       const first = inputMenu()[menuIndex]?.split('  ')[0]
-      if (first) { if (key.name === 'return' || first.startsWith('@')) { state.editor = emptyEditor(); void submit(first) } else state.editor = { ...state.editor, text: first + ' ', cursor: graphemes(first).length + 1 } }
+      if (first) {
+        const prefix = mentionPrefix()
+        if (first.startsWith('@') && prefix !== undefined) {
+          const chars = graphemes(state.editor.text), start = state.editor.cursor - graphemes(prefix).length
+          chars.splice(start, graphemes(prefix).length, ...graphemes(first + ' '))
+          state.editor = { ...state.editor, text: chars.join(''), cursor: start + graphemes(first + ' ').length }
+        } else if (key.name === 'return') { state.editor = emptyEditor(); void submit(first) }
+        else state.editor = { ...state.editor, text: first + ' ', cursor: graphemes(first).length + 1 }
+      }
       menuIndex = 0; redraw(); return
     }
     menuIndex = 0
@@ -394,8 +413,8 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       await refreshSetup()
       if (!configuration.force && configuration.settings.completed) {
         const member = configuration.settings.selected
-        const members: MemberId[] = member === 'all' ? ['codex', 'claude'] : [member]
-        if (members.every(value => setup.members[value]?.auth === 'signed-in')) await setupAction(member === 'all' ? 'all' : `use-${member}`)
+        const members = targets(member)
+        if (members.every(value => setup.members[value]?.auth === 'signed-in' || (value === 'agy' && setup.members[value]?.installed))) await setupAction(member === 'all' ? 'all' : `use-${member}`)
       }
     } else await select('codex')
     await exited

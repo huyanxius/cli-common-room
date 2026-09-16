@@ -1,4 +1,6 @@
-export type MemberId = 'claude' | 'codex'
+export type MemberId = 'claude' | 'codex' | 'agy'
+export const memberIds: readonly MemberId[] = ['codex', 'claude', 'agy']
+export const memberNames: Record<MemberId, string> = { codex: 'Codex', claude: 'Claude Code', agy: 'AGY' }
 
 // 群历史仅保存用户发言和成员完整回复；工具日志与未完成增量不能进入交付上下文。
 export interface HistoryMessage {
@@ -24,7 +26,7 @@ export interface Delivery {
   readonly messages: readonly HistoryMessage[]
 }
 
-const members: readonly string[] = ['claude', 'codex']
+const members: readonly string[] = memberIds
 
 export function planDeliveries(
   roomId: string,
