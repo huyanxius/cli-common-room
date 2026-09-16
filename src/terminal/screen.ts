@@ -1,10 +1,12 @@
 import type { Telemetry } from '../room/telemetry.js'
 import type { Editor } from './editor.js'
 import { fit, wrap, width, graphemes } from './text.js'
-import { quotaLines, tokenLine } from './metrics.js'
-export interface Message { role: string; text: string }
+import { toolSummary } from './tools.js'
+import type { ToolActivity } from '../room/conversation.js'
+import { quotaMeters } from './metrics.js'
+export interface Message { role: string; text: string; tool?: ToolActivity }
 export interface ScreenState {
-  member?: string; secret?: boolean; menuIndex?: number; members?: { name: string; telemetry: Telemetry }[]; telemetry: Telemetry; cwd: string; git: string; status: string; messages: Message[]
+  activity?: string; pickerTitle?: string; queue?: string[]; queuePaused?: boolean; expandTools?: boolean; tick?: number; member?: string; secret?: boolean; menuIndex?: number; members?: { name: string; telemetry: Telemetry }[]; telemetry: Telemetry; cwd: string; git: string; status: string; messages: Message[]
   editor: Editor; scroll: number; menu: string[]; promptTitle: string; seconds: number
 }
 export interface Line { text: string; tone: 'bright' | 'muted' | 'accent' | 'codex' | 'claude' }
@@ -19,18 +21,22 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
   const cols = Math.max(1, columns - 1), height = Math.max(1, rows)
   const line = (text = '', tone: Line['tone'] = 'muted'): Line => ({ text: fit(text, cols), tone })
   const accent = state.promptTitle.toLowerCase().startsWith('claude') || state.member === 'Claude Code' ? 'claude' : state.member === 'Codex + Claude Code' ? 'accent' : 'codex'
-  const head = [line(`COMMON ROOM  /  ${state.status}${state.seconds ? ` ${state.seconds}s` : ''}  /  ${state.telemetry.model ?? '连接中'}`, 'bright')]
-  if (height >= 12) {
-    head.push(line(`${state.cwd}  ·  ${state.git}`))
-    if (!state.members) {
-    head.push(line(`${state.telemetry.provider ?? '原生配置'} · effort ${state.telemetry.effort ?? '—'} · ${state.telemetry.sandbox ?? '—'} · approval ${state.telemetry.approval ?? '—'}`))
-    head.push(line(tokenLine(state.telemetry.usage)))
-    head.push(line(state.telemetry.quotaError || quotaLines(state.telemetry.quotas ?? []).join('  |  ')))
+  const activity = ['Connecting', 'Running', 'Stopping'].includes(state.status) ? `${['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][(state.tick ?? 0) % 10]} ` : ''
+  const head = [line(`COMMON ROOM  /  ${activity}${state.status}${state.seconds ? ` ${state.seconds}s` : ''}  /  ${state.telemetry.model ?? '连接中'}`, 'bright')]
+  if (height >= 18) {
+    head.push(line(`  ${state.cwd}  ·  ${state.git}`))
+    head.push(line('─'.repeat(cols)))
+    const members = state.members ?? [{ name: state.member ?? 'Codex', telemetry: state.telemetry }]
+    for (const member of members) {
+      const value = member.telemetry
+      const context = value.usage?.contextWindow ? ` · 上下文 ${Math.round(value.usage.last / value.usage.contextWindow * 100)}%` : ''
+      const tokens = value.usage ? ` · ${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value.usage.total)} tokens` : ''
+      head.push(line(`  ${member.name}  ${value.model ?? '尚未连接'}${value.effort ? ` · ${value.effort}` : ''}${context}${tokens}${value.billing ? ` · ${value.billing}` : ''}`, member.name === 'Claude Code' ? 'claude' : 'codex'))
+      const meters = value.quotaError || quotaMeters(value.quotas ?? [], cols < 100 ? 4 : 8) || '订阅额度待检测 · /usage 刷新'
+      const meterRows = wrap(meters, Math.max(1, cols - 4))
+      head.push(...meterRows.slice(0, height >= 24 ? 2 : 1).map(text => line(`  ${text}`)))
     }
-    if (state.members && height >= 12) for (const member of state.members) {
-      head.push(line(`${member.name} · ${member.telemetry.model ?? '未连接'} · ${tokenLine(member.telemetry.usage)}`, member.name === 'Codex' ? 'codex' : 'claude'))
-      head.push(line(member.telemetry.quotaError || quotaLines(member.telemetry.quotas ?? []).join(' | ')))
-    }
+    head.push(line('─'.repeat(cols)))
   }
   const inner = Math.max(1, cols - 4)
   const displayText = state.secret ? '*'.repeat(graphemes(state.editor.text).length) : state.editor.text
@@ -42,21 +48,45 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
   const firstInput = Math.max(0, cursorLine - visibleCount + 1)
   const shownInput = inputLines.slice(firstInput, firstInput + visibleCount)
   if (!shownInput.length) shownInput.push('')
-  const bottom = [line(`╭─ ${state.promptTitle || state.member || 'Codex'} ${'─'.repeat(cols)}`, accent), ...shownInput.map((text, index) => line(`${index ? '│' : '>'} ${text}`, state.editor.text ? 'bright' : 'muted')), line('╰' + '─'.repeat(Math.max(0, cols - 1)), accent)]
-  if (height >= 10) bottom.push(line('Enter 发送 · Alt+Enter 换行 · PgUp/Dn 滚动 · Ctrl+C 停止/退出'))
+  const title = fit(`─ ${state.pickerTitle || state.promptTitle || state.member || 'Codex'} `, Math.max(0, cols - 2)).trimEnd()
+  const bottom = [line('╭' + title + '─'.repeat(Math.max(0, cols - 2 - width(title))) + '╮', accent), ...shownInput.map((text, index) => line(`${index ? '│' : '>'} ${fit(text, inner)} │`, state.editor.text ? 'bright' : 'muted')), line('╰' + '─'.repeat(Math.max(0, cols - 2)) + '╯', accent)]
+  if (activity && height >= 15) bottom.unshift(line(`  ${activity}${state.activity || (state.status === 'Connecting' ? '连接原生 Agent' : state.status === 'Stopping' ? '正在停止' : '等待 Agent 输出')} · ${state.seconds}s · Esc 打断`, accent))
+  if (state.queue?.length && height >= 15) bottom.unshift(line(`${state.queuePaused ? 'Ⅱ 队列暂停' : '↳ 排队'} · ${state.queue.length} 条 · ${state.queue[0]} · /queue drop 撤回`, 'bright'))
+  if (height >= 10) bottom.push(line(`${state.scroll ? '↑ 阅读历史 · Ctrl+End 回到底部 · ' : ''}Enter ${state.status === 'Approval' || state.pickerTitle ? '确认选择' : state.status === 'Running' ? '排队' : '发送'} · @ 成员 · / 命令 · Esc 打断 · Ctrl+T 工具详情`))
   const available = Math.max(0, height - head.length - bottom.length)
   let body: Line[] = []
   if (state.messages.length) {
     for (const message of state.messages) {
-      body.push(line(`  ${message.role}`, message.role.startsWith('Codex') ? 'codex' : message.role.startsWith('Claude') ? 'claude' : 'muted'))
-      body.push(...messageLines(message, Math.max(1, cols - 4)).map(text => line(`  ${text}`, message.role === 'Claude Code' || message.role === 'Codex' || message.role === '你' ? 'bright' : 'muted')))
+      const tone = message.role.startsWith('Codex') ? 'codex' : message.role.startsWith('Claude') ? 'claude' : 'muted'
+      if (message.tool) {
+        const tool = message.tool, summary = toolSummary(tool)
+        const icon = tool.status === 'running' ? ['⠋', '⠙', '⠹', '⠸'][(state.tick ?? 0) % 4] : tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'cancelled' ? '■' : '?'
+        body.push(line(`    ${icon} ${message.role} · ${summary.title}`, tone))
+        const detail = wrap(summary.detail, Math.max(1, cols - 8))
+        body.push(...(state.expandTools ? detail : detail.slice(0, 3)).map(text => line(`      │ ${text}`)))
+        if (!state.expandTools && detail.length > 3) body.push(line(`      └ … ${detail.length - 3} 行已收起 · Ctrl+T 展开`))
+        body.push(line())
+        continue
+      }
+      if (message.role === '你') {
+        body.push(line('  › 你', 'bright'))
+        body.push(...messageLines(message, Math.max(1, cols - 6)).map(text => line(`  │ ${text}`, 'bright')))
+
+      } else {
+        body.push(line(`  ● ${message.role}`, tone))
+        let code = false
+        for (const text of messageLines(message, Math.max(1, cols - 6))) {
+          if (text.startsWith('```')) { code = !code; body.push(line(`    ${code ? '┌─ ' + text.slice(3) : '└─'}`)); continue }
+          body.push(line(`    ${code ? '│ ' : ''}${text}`, code || tone === 'muted' ? 'muted' : 'bright'))
+        }
+      }
       body.push(line())
     }
   } else if (cols >= 78 && available >= 10) {
     const logo = [
       ' █▀▀ █▀█ █▀▄▀█ █▀▄▀█ █▀█ █▄ █   █▀█ █▀█ █▀█ █▀▄▀█',
       ' █▄▄ █▄█ █ ▀ █ █ ▀ █ █▄█ █ ▀█   █▀▄ █▄█ █▄█ █ ▀ █',
-      '', 'NATIVE AGENTS · SHARED WORKSPACE', '', '/to codex · /to claude · /to all',
+      '', 'NATIVE AGENTS · SHARED WORKSPACE', '', '@ 选择成员  ·  / 浏览命令  ·  /setup 配置登录',
     ]
     body = Array.from({ length: Math.max(1, Math.floor((available - logo.length) / 3)) }, () => line())
     body.push(...logo.map((text, index) => line(' '.repeat(Math.max(0, Math.floor((cols - width(text)) / 2))) + text, index < 2 ? 'bright' : 'muted')))
@@ -70,5 +100,5 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
   while (body.length < contentHeight) body.push(line())
   const lines = [...head, ...body, ...menu, ...bottom].slice(0, height)
   while (lines.length < height) lines.push(line())
-  return { lines, cursor: { row: Math.min(height, head.length + available + 2 + cursorLine - firstInput), column: Math.min(cols, 3 + width(beforeLines.at(-1) ?? '')) }, maxScroll }
+  return { lines, cursor: { row: Math.min(height, head.length + available + bottom.findIndex(line => line.text.startsWith('╭')) + 2 + cursorLine - firstInput), column: Math.min(cols, 3 + width(beforeLines.at(-1) ?? '')) }, maxScroll }
 }
