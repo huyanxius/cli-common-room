@@ -168,7 +168,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     } finally { if (generation === setupGeneration) setup.pending = false; redraw() }
   }
   const openSetup = (member?: MemberId): void => {
-    showingSetup = true; setup.view = member ?? 'welcome'; setup.index = 0; setup.editing = undefined; setup.input = ''; setup.output = ''; redraw()
+    showingSetup = true; setup.view = member ?? 'welcome'; setup.index = 0; setup.editing = undefined; setup.input = ''; setup.inputCursor = 0; setup.output = ''; redraw()
     void refreshSetup()
   }
   const setupAction = async (id: string): Promise<void> => {
@@ -180,7 +180,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if (id === 'codex' || id === 'claude') { setup.view = id; setup.index = 0; setup.output = ''; return }
       if (id === 'refresh') { await refreshSetup(); return }
       if (id === 'source') { setup.authSource = setup.authSource === 'inherit' ? 'native' : 'inherit'; connectionsChanged = true; await refreshSetup(); return }
-      if (id === 'path' && setup.view !== 'welcome') { setup.editing = 'path'; setup.input = setup.binaries[setup.view]; setup.index = 0; return }
+      if (id === 'path' && setup.view !== 'welcome') { setup.editing = 'path'; setup.input = setup.binaries[setup.view]; setup.inputCursor = graphemes(setup.input).length; setup.index = 0; return }
       if (id === 'save-path' && setup.view !== 'welcome') {
         const path = setup.input.trim()
         if (!path || /[\x00-\x1f\x7f]/.test(path)) throw new Error('请输入有效程序路径')
@@ -189,7 +189,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
       if ((id === 'login' || id === 'alternate') && setup.view !== 'welcome') {
         const member = setup.view
         if (member === 'claude') setup.authSource = 'native'
-        setup.pending = true; setup.index = 0; setup.editing = 'code'; setup.input = ''; setup.output = ''
+        setup.pending = true; setup.index = 0; setup.editing = 'code'; setup.input = ''; setup.inputCursor = 0; setup.output = ''
         setup.status = '等待浏览器授权 · Esc 取消 · 原生要求验证码时可在下方输入'
         connectionsChanged = true
         login = loginNative(member, setup.binaries[member], { cwd: state.cwd, ...(member === 'claude' ? { env: authenticationEnv(setup.authSource) } : {}), method: id === 'login' ? 'browser' : member === 'codex' ? 'device' : 'console', onOutput: text => { setup.output = text; redraw() } })
@@ -317,8 +317,8 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     if (showingSetup) {
       if (key.name === 'escape' || (key.ctrl && key.name === 'c')) { void setupAction(setup.pending ? 'cancel' : setup.view !== 'welcome' || setup.editing ? 'back' : 'close'); return }
       if (setup.editing) {
-        if (key.name === 'return') { if (setup.editing === 'code') { login?.send(setup.input); setup.input = '' } else void setupAction('save-path') }
-        else { const value = edit({ ...emptyEditor(), text: setup.input, cursor: graphemes(setup.input).length }, { name: key.name ?? '', ...(text ? { text } : {}), ctrl: !!key.ctrl }); setup.input = value.state.text }
+        if (key.name === 'return') { if (setup.editing === 'code') { login?.send(setup.input); setup.input = ''; setup.inputCursor = 0 } else void setupAction('save-path') }
+        else { const value = edit({ ...emptyEditor(), text: setup.input, cursor: setup.inputCursor ?? graphemes(setup.input).length }, { name: key.name ?? '', ...(text ? { text } : {}), ctrl: !!key.ctrl }); setup.input = value.state.text; setup.inputCursor = value.state.cursor }
       } else if (key.name === 'up' || key.name === 'down') setup.index = (setup.index + (key.name === 'down' ? 1 : -1) + setupActions(setup).length) % setupActions(setup).length
       else if (key.name === 'return') void setupAction(setupActions(setup)[setup.index]?.id ?? 'back')
       redraw(); return
@@ -372,7 +372,7 @@ export async function terminalWorkspace(factories: ConversationFactories, config
     state.editor = result.state
     if (result.submit !== undefined) void submit(result.submit)
     redraw()
-  }, text => { if (showingSetup) { if (setup.editing) setup.input += text.replace(/[\r\n]/g, ''); redraw(); return }; state.editor = edit(state.editor, { name: 'paste', text: text.replace(/\r\n?/g, '\n') }).state; redraw() }, delta => { if (!showingSetup) { state.scroll = Math.max(0, state.scroll + delta); redraw() } })
+  }, text => { if (showingSetup) { if (setup.editing) { const value = edit({ ...emptyEditor(), text: setup.input, cursor: setup.inputCursor ?? graphemes(setup.input).length }, { name: 'paste', text: text.replace(/[\r\n]/g, '') }); setup.input = value.state.text; setup.inputCursor = value.state.cursor }; redraw(); return }; state.editor = edit(state.editor, { name: 'paste', text: text.replace(/\r\n?/g, '\n') }).state; redraw() }, delta => { if (!showingSetup) { state.scroll = Math.max(0, state.scroll + delta); redraw() } })
   const data = (chunk: string): void => input.feed(chunk)
   const resize = (): void => { previous = []; redraw() }
   const signal = (): void => { void stop() }

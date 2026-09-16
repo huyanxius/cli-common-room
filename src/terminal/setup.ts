@@ -4,7 +4,7 @@ import type { Line } from './screen.js'
 import { fit, wrap, width, graphemes } from './text.js'
 export interface SetupState {
   authSource: 'inherit' | 'native'; view: 'welcome' | MemberId; index: number; pending: boolean; status: string; output: string
-  input: string; editing: 'path' | 'code' | undefined
+  input: string; inputCursor?: number; editing: 'path' | 'code' | undefined
   binaries: Record<MemberId, string>; members: Record<MemberId, NativeStatus | undefined>
 }
 export const createSetup = (): SetupState => ({ authSource: 'inherit', view: 'welcome', index: 0, pending: false, status: '连接你的原生 Agent', output: '', input: '', editing: undefined, binaries: { codex: 'codex', claude: 'claude' }, members: { codex: undefined, claude: undefined } })
@@ -69,5 +69,5 @@ export function renderSetup(state: SetupState, columns: number, rows: number, ti
   while (lines.length < height - footer.length) lines.push(line())
   lines.push(...footer)
   lines.splice(height)
-  return { lines, cursor: { row: Math.min(height, top + visibleBody.length + visibleMenu.length + editor.length), column: Math.min(cols, left + 3 + width(state.editing === 'code' ? '*'.repeat(graphemes(state.input).length) : state.input)) }, maxScroll: 0 }
+  return { lines, cursor: { row: Math.min(height, top + visibleBody.length + visibleMenu.length + editor.length), column: Math.min(cols, left + 3 + width(state.editing === 'code' ? '*'.repeat(state.inputCursor ?? graphemes(state.input).length) : graphemes(state.input).slice(0, state.inputCursor ?? graphemes(state.input).length).join(''))) }, maxScroll: 0 }
 }
