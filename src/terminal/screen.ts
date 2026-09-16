@@ -20,6 +20,8 @@ function messageLines(message: Message, columns: number): string[] {
 export function renderScreen(state: ScreenState, columns: number, rows: number): { lines: Line[]; cursor: { row: number; column: number }; maxScroll: number } {
   const cols = Math.max(1, columns - 1), height = Math.max(1, rows)
   const line = (text = '', tone: Line['tone'] = 'muted'): Line => ({ text: fit(text, cols), tone })
+  // 历史正文先不裁切补齐，滚动窗口切出可见行后再 fit：打字、滚轮每次都重绘，逐行 fit 全部历史会随会话长度线性变慢。
+  const raw = (text = '', tone: Line['tone'] = 'muted'): Line => ({ text, tone })
   const accent = state.promptTitle.toLowerCase().startsWith('claude') || state.member === 'Claude Code' ? 'claude' : state.member === 'Codex + Claude Code' ? 'accent' : 'codex'
   const activity = ['Connecting', 'Running', 'Stopping'].includes(state.status) ? `${['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][(state.tick ?? 0) % 10]} ` : ''
   const head = [line(`COMMON ROOM  /  ${activity}${state.status}${state.seconds ? ` ${state.seconds}s` : ''}  /  ${state.telemetry.model ?? '连接中'}`, 'bright')]
@@ -61,26 +63,26 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
       if (message.tool) {
         const tool = message.tool, summary = toolSummary(tool)
         const icon = tool.status === 'running' ? ['⠋', '⠙', '⠹', '⠸'][(state.tick ?? 0) % 4] : tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '×' : tool.status === 'cancelled' ? '■' : '?'
-        body.push(line(`    ${icon} ${message.role} · ${summary.title}`, tone))
+        body.push(raw(`    ${icon} ${message.role} · ${summary.title}`, tone))
         const detail = wrap(summary.detail, Math.max(1, cols - 8))
-        body.push(...(state.expandTools ? detail : detail.slice(0, 3)).map(text => line(`      │ ${text}`)))
-        if (!state.expandTools && detail.length > 3) body.push(line(`      └ … ${detail.length - 3} 行已收起 · Ctrl+T 展开`))
-        body.push(line())
+        body.push(...(state.expandTools ? detail : detail.slice(0, 3)).map(text => raw(`      │ ${text}`)))
+        if (!state.expandTools && detail.length > 3) body.push(raw(`      └ … ${detail.length - 3} 行已收起 · Ctrl+T 展开`))
+        body.push(raw())
         continue
       }
       if (message.role === '你') {
-        body.push(line('  › 你', 'bright'))
-        body.push(...messageLines(message, Math.max(1, cols - 6)).map(text => line(`  │ ${text}`, 'bright')))
+        body.push(raw('  › 你', 'bright'))
+        body.push(...messageLines(message, Math.max(1, cols - 6)).map(text => raw(`  │ ${text}`, 'bright')))
 
       } else {
-        body.push(line(`  ● ${message.role}`, tone))
+        body.push(raw(`  ● ${message.role}`, tone))
         let code = false
         for (const text of messageLines(message, Math.max(1, cols - 6))) {
-          if (text.startsWith('```')) { code = !code; body.push(line(`    ${code ? '┌─ ' + text.slice(3) : '└─'}`)); continue }
-          body.push(line(`    ${code ? '│ ' : ''}${text}`, code || tone === 'muted' ? 'muted' : 'bright'))
+          if (text.startsWith('```')) { code = !code; body.push(raw(`    ${code ? '┌─ ' + text.slice(3) : '└─'}`)); continue }
+          body.push(raw(`    ${code ? '│ ' : ''}${text}`, code || tone === 'muted' ? 'muted' : 'bright'))
         }
       }
-      body.push(line())
+      body.push(raw())
     }
   } else if (cols >= 78 && available >= 10) {
     const logo = [
@@ -88,15 +90,15 @@ export function renderScreen(state: ScreenState, columns: number, rows: number):
       ' █▄▄ █▄█ █ ▀ █ █ ▀ █ █▄█ █ ▀█   █▀▄ █▄█ █▄█ █ ▀ █',
       '', 'NATIVE AGENTS · SHARED WORKSPACE', '', '@ 选择成员  ·  / 浏览命令  ·  /setup 配置登录',
     ]
-    body = Array.from({ length: Math.max(1, Math.floor((available - logo.length) / 3)) }, () => line())
-    body.push(...logo.map((text, index) => line(' '.repeat(Math.max(0, Math.floor((cols - width(text)) / 2))) + text, index < 2 ? 'bright' : 'muted')))
-  } else body = [line('  COMMON ROOM', 'bright'), line('  / 查看命令；输入消息开始')]
+    body = Array.from({ length: Math.max(1, Math.floor((available - logo.length) / 3)) }, () => raw())
+    body.push(...logo.map((text, index) => raw(' '.repeat(Math.max(0, Math.floor((cols - width(text)) / 2))) + text, index < 2 ? 'bright' : 'muted')))
+  } else body = [raw('  COMMON ROOM', 'bright'), raw('  / 查看命令；输入消息开始')]
   const menuStart = Math.max(0, (state.menuIndex ?? 0) - 6)
   const menu = state.menu.slice(menuStart, menuStart + Math.max(0, Math.min(8, available - 1))).map((text, index) => line(`${index + menuStart === (state.menuIndex ?? 0) ? '›' : ' '} ${text}`, accent))
   const contentHeight = Math.max(0, available - menu.length)
   const maxScroll = Math.max(0, body.length - contentHeight)
   const scroll = Math.min(state.scroll, maxScroll)
-  body = body.slice(Math.max(0, body.length - contentHeight - scroll), Math.max(0, body.length - scroll))
+  body = body.slice(Math.max(0, body.length - contentHeight - scroll), Math.max(0, body.length - scroll)).map(item => line(item.text, item.tone))
   while (body.length < contentHeight) body.push(line())
   const lines = [...head, ...body, ...menu, ...bottom].slice(0, height)
   while (lines.length < height) lines.push(line())
