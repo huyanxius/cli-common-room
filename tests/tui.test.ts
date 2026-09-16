@@ -62,3 +62,52 @@ test('敏感问题的输入不进入渲染帧', () => {
   assert.ok(!frame.lines.some(line => line.text.includes('secret-token')))
   assert.ok(frame.lines.some(line => line.text.includes('************')))
 })
+
+test('输入框右侧在中文长标题和多行输入时完整闭合', () => {
+  for (const columns of [20, 40, 100]) {
+    const frame = renderScreen({ member: 'Claude Code', telemetry: {}, cwd: '/tmp', git: '', status: 'Ready', messages: [], editor: { ...emptyEditor(), text: '中文\n第二行', cursor: 6 }, scroll: 0, menu: [], promptTitle: '很长的审批标题'.repeat(8), seconds: 0 }, columns, 24)
+    const top = frame.lines.findIndex(line => line.text.startsWith('╭'))
+    const bottom = frame.lines.findIndex(line => line.text.startsWith('╰'))
+    assert.ok(frame.lines[top]!.text.endsWith('╮'))
+    assert.ok(frame.lines[bottom]!.text.endsWith('╯'))
+    for (const line of frame.lines.slice(top + 1, bottom)) assert.ok(line.text.endsWith('│'))
+  }
+})
+
+test('运行状态动画随帧变化，空闲状态不闪动', () => {
+  const state = { telemetry: {}, cwd: '/tmp', git: '', status: 'Running', messages: [], editor: emptyEditor(), scroll: 0, menu: [], promptTitle: '', seconds: 2, tick: 0 }
+  const first = renderScreen(state, 80, 24)
+  const next = renderScreen({ ...state, tick: 1 }, 80, 24)
+  assert.notEqual(first.lines[0]!.text, next.lines[0]!.text)
+  assert.deepEqual(renderScreen({ ...state, status: 'Ready' }, 80, 24).lines, renderScreen({ ...state, status: 'Ready', tick: 1 }, 80, 24).lines)
+})
+
+test('独立 Esc 不被粘贴前缀吞掉；跨块鼠标滚轮不会写入编辑器', async () => {
+  const keys: string[] = [], scroll: number[] = []
+  const input = new TerminalInput((_text, key) => keys.push(key.name ?? ''), () => {}, delta => scroll.push(delta))
+  input.feed('\x1b'); await new Promise(resolve => setTimeout(resolve, 80))
+  assert.deepEqual(keys, ['escape'])
+  input.feed('\x1b[<64;'); input.feed('10;5M'); input.feed('\x1b[<65;10;5M')
+  assert.deepEqual(scroll, [3, -3]); assert.deepEqual(keys, ['escape'])
+  input.close()
+})
+
+test('工作动画和队列出现后，光标仍落在输入行而不是状态行', () => {
+  const state = { telemetry: {}, cwd: '/tmp', git: '', status: 'Running', messages: [], editor: { ...emptyEditor(), text: '草稿', cursor: 2 }, scroll: 0, menu: [], promptTitle: '', seconds: 2, queue: ['@claude 等待发送'] }
+  const frame = renderScreen(state, 100, 30)
+  assert.ok(frame.lines[frame.cursor.row - 1]!.text.startsWith('> '))
+  assert.equal(frame.cursor.column, 7)
+})
+
+test('鼠标报告在任意字节边界拆包都不会变成输入文字', async () => {
+  const report = '\x1b[<64;12;8M'
+  for (let split = 1; split < report.length; split++) {
+    const keys: string[] = [], scroll: number[] = []
+    const input = new TerminalInput(text => keys.push(text), () => {}, delta => scroll.push(delta))
+    input.feed(report.slice(0, split)); input.feed(report.slice(split))
+    await new Promise(resolve => setTimeout(resolve, 40))
+    assert.deepEqual(keys, [], `split ${split}`)
+    assert.deepEqual(scroll, [3], `split ${split}`)
+    input.close()
+  }
+})

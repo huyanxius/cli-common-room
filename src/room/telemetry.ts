@@ -1,6 +1,10 @@
 export interface Quota { name: string; windows: { minutes: number | null; usedPercent: number; resetsAt: number | null }[] }
 export interface Usage { total: number; input: number; cached: number; output: number; reasoning: number; last: number; contextWindow: number | null }
 export interface Telemetry {
+  executable?: string
+  configDirectory?: string
+  authSource?: string
+  billing?: string
   model?: string
   provider?: string
   effort?: string

@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as state:
         os.write(master, b'\r')
         time.sleep(.1)
         assert process.poll() is None
-        os.write(master, b'3\r')
+        os.write(master, b'\x1b[B\x1b[B\x1b[B\r')
         wait_for('Ready')
         output.clear()
         os.write(master, b'/exit\r')

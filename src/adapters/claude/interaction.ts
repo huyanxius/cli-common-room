@@ -13,7 +13,7 @@ export async function answerToolPermission(tool: string, input: Record<string, u
     }
     return { behavior: 'allow', updatedInput: { ...input, answers } }
   }
-  const choice = await interact({ kind: 'approval', title: `Claude Code · ${tool}`, details: JSON.stringify(input, null, 2), signal: options.signal, choices: [{ id: 'allow', label: '仅允许本次' }, { id: 'deny', label: '拒绝' }, { id: 'cancel', label: '停止本轮' }] })
+  const choice = await interact({ kind: 'approval', title: `Claude Code · ${tool}`, details: Object.entries(input).map(([key, value]) => `${key === 'file_path' ? '文件' : key === 'command' ? '命令' : key === 'description' ? '说明' : key}：${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}`).join('\n'), signal: options.signal, choices: [{ id: 'allow', label: '仅允许本次' }, { id: 'deny', label: '拒绝' }, { id: 'cancel', label: '停止本轮' }] })
   if (options.signal.aborted) throw new Error('交互已过期')
   if (choice === 'allow') return { behavior: 'allow', updatedInput: input }
   if (choice === 'deny' || choice === 'cancel') return { behavior: 'deny', message: '用户拒绝此操作', interrupt: choice === 'cancel' }
