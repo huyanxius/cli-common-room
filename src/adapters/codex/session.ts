@@ -32,6 +32,7 @@ export class CodexSession {
   private closed = false
   private initializing = false
   private compacting = false
+  private cancelling = false
   private mode: 'plan' | 'default' | undefined
   private serviceTier: string | undefined
   private permissionOverride: Record<string, unknown> = {}
@@ -76,7 +77,7 @@ export class CodexSession {
         if (active !== this.active || active.done || active.abort.signal.aborted) throw new Error('过期交互')
         return response
       } catch {
-        if (!active.done) {
+        if (!active.done && !this.cancelling) {
           active.fail(new Error('原生交互未完成，轮次已停止；不会自动批准'))
           void this.close()
         }
@@ -128,9 +129,16 @@ export class CodexSession {
       active.buffer = []
       return await completed
     } catch (error) { await this.close(); throw error }
-    finally { clearTimeout(timer); active.abort.abort(); this.active = null }
+    finally { clearTimeout(timer); active.abort.abort(); this.active = null; this.cancelling = false }
   }
 
+  async choices(name: 'model' | 'effort'): Promise<import('../../room/conversation.js').CommandChoice[]> {
+    const response = record(await this.rpc.request('model/list', {}))
+    const models = Array.isArray(response.data) ? response.data.map(record) : []
+    if (name === 'model') return models.map(model => ({ value: String(model.model), label: String(model.displayName ?? model.model), description: String(model.description ?? ''), current: model.model === (this.modelOverride ?? this.currentModel) }))
+    const model = models.find(model => model.model === (this.modelOverride ?? this.currentModel)) ?? models.find(model => model.isDefault)
+    return model && Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts.map(record).map(item => ({ value: String(item.reasoningEffort), label: String(item.reasoningEffort), description: String(item.description ?? ''), current: item.reasoningEffort === (this.effortOverride ?? model.defaultReasoningEffort) })) : []
+  }
   async command(name: string, argument: string): Promise<string> {
     if (this.closed || !this.threadId) throw new Error('会话尚未连接或已关闭')
     if (this.active || this.compacting) throw new Error('请等待当前轮次结束')
@@ -253,6 +261,7 @@ export class CodexSession {
     if (this.compacting) { await this.close(); return }
     const active = this.active
     if (!active || active.done) return
+    this.cancelling = true
     const turnId = await active.ready
     if (active.done || this.active !== active) return
     await this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId })
@@ -280,7 +289,7 @@ export class CodexSession {
           if (!active.parts.has(itemId)) this.options.onEvent?.({ type: 'text', text: item.text })
           active.parts.set(itemId, item.text)
         } else if (!['agentMessage', 'userMessage', 'reasoning', 'hookPrompt'].includes(String(item.type))) {
-          this.options.onEvent?.({ type: 'tool', text: `${method === 'item/started' ? '开始' : '结束'} ${JSON.stringify(item)}` })
+          this.options.onEvent?.({ type: 'tool', text: String(item.type), tool: { id: String(item.id), name: String(item.type), input: item, ...(typeof item.aggregatedOutput === 'string' ? { output: item.aggregatedOutput } : {}), status: method === 'item/started' ? 'running' : item.status === 'failed' || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : 'completed' } })
         }
       } else if (turn) {
         const status = turn.status === 'completed' ? 'completed' : turn.status === 'interrupted' ? 'cancelled' : turn.status === 'failed' ? 'failed' : null
