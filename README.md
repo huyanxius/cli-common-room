@@ -11,16 +11,16 @@ npm ci
 npm run build
 npm link
 cd /path/to/your/project
-common-room
+room
 ```
 
-不安装全局命令时，在仓库运行 `npm start`，或在目标工作目录运行 `/path/to/cli-common-room/bin/common-room.mjs`。命令以当前目录作为工作区，不覆盖 `codex` 或 `claude`。
+不安装全局命令时，在仓库运行 `npm start`，或在目标工作目录运行 `/path/to/cli-common-room/bin/common-room.mjs`。`room` 以当前目录作为工作区，旧命令 `common-room` 保留兼容，不覆盖 `codex` 或 `claude`。
 
 ```sh
-common-room --help
-common-room --status
-common-room --check-codex
-common-room --codex-bin /path/to/codex --claude-bin /path/to/claude
+room --help
+room --status
+room --check-codex
+room --codex-bin /path/to/codex --claude-bin /path/to/claude
 ```
 
 程序继承当前环境，包括 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`。Shell alias 不会自动变成子进程配置；alias 中的环境变量应在启动前导出，程序路径使用上面的参数。SDK 调用 PATH 中的本机 Claude Code，不使用 SDK 随包附带的另一份 CLI。没有免审批、禁用工具或替换认证的默认开关。
