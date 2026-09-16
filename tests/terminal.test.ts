@@ -24,3 +24,10 @@ test('连接检查的启动失败返回非零退出码且不报告成功', () =>
   assert.match(failed.stderr, /启动失败/)
   assert.doesNotMatch(failed.stdout, /成功/)
 })
+
+
+test('非交互输入不能进入需要人工授权的聊天入口', () => {
+  const result = spawnSync(process.execPath, [entry.pathname, '--codex-chat'], { encoding: 'utf8' })
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /交互终端/)
+})
